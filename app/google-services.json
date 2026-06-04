@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "317421736638",
+    "project_id": "receiptvault-corsair",
+    "storage_bucket": "receiptvault-corsair.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:317421736638:android:c3094503df5e20904304ef",
+        "android_client_info": {
+          "package_name": "com.corsairlabs.receiptvault"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBBvEnGcBbwuY1-HR2YcPth5of4_d94gzA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

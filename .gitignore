@@ -5,6 +5,9 @@ build/
 **/build/
 local.properties
 captures/
+.firebase/
+node_modules/
+**/node_modules/
 *.iml
 *.jks
 *.keystore

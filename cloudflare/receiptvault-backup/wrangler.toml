@@ -1,0 +1,11 @@
+name = "receiptvault-backup"
+main = "src/index.ts"
+compatibility_date = "2026-06-04"
+
+[vars]
+FIREBASE_PROJECT_ID = "receiptvault-corsair"
+REQUIRE_PLUS_CLAIM = "true"
+
+[[r2_buckets]]
+binding = "RECEIPTS_BUCKET"
+bucket_name = "receiptvault-receipts"

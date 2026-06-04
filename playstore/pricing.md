@@ -17,6 +17,8 @@ Price: $0
 Price: $4.99/month or $39.99/year
 
 - 1,000 stored receipts.
+- Optional Cloudflare R2 cloud backup.
+- Restore backed-up receipts on a new device.
 - Unlimited warranty tracking.
 - Return and warranty reminders.
 - Advanced search.
