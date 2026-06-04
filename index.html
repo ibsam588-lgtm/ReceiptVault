@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ReceiptVault App Design</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="workspace" aria-label="ReceiptVault design prototype">
+      <aside class="brief">
+        <p class="eyebrow">Android MVP</p>
+        <h1>ReceiptVault</h1>
+        <p>
+          A receipt vault for returns, warranties, and everyday expense tracking.
+          Scan once, search forever.
+        </p>
+        <div class="brief-grid" aria-label="Design highlights">
+          <div>
+            <strong>Primary flow</strong>
+            <span>Scan receipt, confirm details, save proof.</span>
+          </div>
+          <div>
+            <strong>Revenue</strong>
+            <span>Free plan plus $4.99/month Plus subscription.</span>
+          </div>
+          <div>
+            <strong>OCR</strong>
+            <span>Android ML Kit text recognition with local parsing.</span>
+          </div>
+        </div>
+      </aside>
+
+      <section class="phone-shell" aria-label="ReceiptVault phone preview">
+        <div class="phone">
+          <div class="status-bar">
+            <span>9:41</span>
+            <span class="status-icons">5G 82%</span>
+          </div>
+
+          <section class="screen active" data-screen="home" aria-label="Home screen">
+            <header class="topbar">
+              <div>
+                <p class="kicker">Good morning</p>
+                <h2>ReceiptVault</h2>
+              </div>
+              <button class="icon-button" aria-label="Notifications">
+                <i data-lucide="bell"></i>
+              </button>
+            </header>
+
+            <section class="hero-panel">
+              <div>
+                <p>Total tracked</p>
+                <strong>$1,284.72</strong>
+                <span>43 receipts this month</span>
+              </div>
+              <button class="scan-button" data-go="scan" aria-label="Scan receipt">
+                <i data-lucide="scan-line"></i>
+              </button>
+            </section>
+
+            <section class="quick-row" aria-label="Quick stats">
+              <article>
+                <span class="dot teal"></span>
+                <strong>3</strong>
+                <p>Returns open</p>
+              </article>
+              <article>
+                <span class="dot amber"></span>
+                <strong>7</strong>
+                <p>Warranties</p>
+              </article>
+              <article>
+                <span class="dot coral"></span>
+                <strong>$316</strong>
+                <p>Electronics</p>
+              </article>
+            </section>
+
+            <section class="section-heading">
+              <h3>Needs attention</h3>
+              <button class="text-button" data-go="warranties">View</button>
+            </section>
+
+            <article class="alert-card">
+              <div class="alert-icon"><i data-lucide="clock-3"></i></div>
+              <div>
+                <strong>Headphones return window</strong>
+                <p>Target receipt expires in 4 days.</p>
+              </div>
+            </article>
+
+            <section class="section-heading">
+              <h3>Recent receipts</h3>
+              <button class="text-button" data-go="search">Search</button>
+            </section>
+
+            <div class="receipt-list">
+              <button class="receipt-row" data-go="receipt">
+                <span class="merchant-mark">T</span>
+                <span>
+                  <strong>Target</strong>
+                  <small>Electronics • Jun 2</small>
+                </span>
+                <b>$89.99</b>
+              </button>
+              <button class="receipt-row" data-go="receipt">
+                <span class="merchant-mark blue">B</span>
+                <span>
+                  <strong>Best Buy</strong>
+                  <small>Warranty saved • May 28</small>
+                </span>
+                <b>$249.00</b>
+              </button>
+              <button class="receipt-row" data-go="receipt">
+                <span class="merchant-mark green">C</span>
+                <span>
+                  <strong>Costco</strong>
+                  <small>Groceries • May 25</small>
+                </span>
+                <b>$142.18</b>
+              </button>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="scan" aria-label="Scan result screen">
+            <header class="topbar compact">
+              <button class="icon-button" data-go="home" aria-label="Back home">
+                <i data-lucide="chevron-left"></i>
+              </button>
+              <h2>New receipt</h2>
+              <button class="icon-button" aria-label="Retake photo">
+                <i data-lucide="refresh-cw"></i>
+              </button>
+            </header>
+
+            <section class="camera-card">
+              <div class="receipt-paper">
+                <span>BEST BUY</span>
+                <i></i><i></i><i></i><i></i><i></i>
+                <strong>$249.00</strong>
+              </div>
+              <div class="scan-frame"></div>
+            </section>
+
+            <section class="confidence">
+              <span><i data-lucide="sparkles"></i> Auto-labeled</span>
+              <strong>94%</strong>
+            </section>
+
+            <form class="details-form">
+              <label>
+                Store
+                <input value="Best Buy" />
+              </label>
+              <label>
+                Date
+                <input value="May 28, 2026" />
+              </label>
+              <label>
+                Total
+                <input value="$249.00" />
+              </label>
+              <label>
+                Category
+                <select>
+                  <option>Electronics</option>
+                  <option>Groceries</option>
+                  <option>Home</option>
+                  <option>Business</option>
+                </select>
+              </label>
+            </form>
+
+            <button class="primary-button" data-go="receipt">
+              <i data-lucide="vault"></i>
+              Save to vault
+            </button>
+          </section>
+
+          <section class="screen" data-screen="receipt" aria-label="Receipt detail screen">
+            <header class="topbar compact">
+              <button class="icon-button" data-go="home" aria-label="Back home">
+                <i data-lucide="chevron-left"></i>
+              </button>
+              <h2>Receipt</h2>
+              <button class="icon-button" aria-label="Share receipt">
+                <i data-lucide="share-2"></i>
+              </button>
+            </header>
+
+            <section class="merchant-header">
+              <span class="merchant-mark blue">B</span>
+              <div>
+                <p>Best Buy</p>
+                <h3>$249.00</h3>
+              </div>
+              <span class="pill">Saved</span>
+            </section>
+
+            <section class="receipt-preview">
+              <div class="receipt-paper large">
+                <span>BEST BUY</span>
+                <i></i><i></i><i></i><i></i><i></i><i></i>
+                <strong>$249.00</strong>
+              </div>
+            </section>
+
+            <section class="detail-grid">
+              <article>
+                <i data-lucide="calendar"></i>
+                <span>Purchased</span>
+                <strong>May 28, 2026</strong>
+              </article>
+              <article>
+                <i data-lucide="map-pin"></i>
+                <span>Location</span>
+                <strong>Frisco, TX</strong>
+              </article>
+              <article>
+                <i data-lucide="undo-2"></i>
+                <span>Return by</span>
+                <strong>Jun 27, 2026</strong>
+              </article>
+              <article>
+                <i data-lucide="shield-check"></i>
+                <span>Warranty</span>
+                <strong>1 year</strong>
+              </article>
+            </section>
+
+            <section class="item-panel">
+              <div>
+                <strong>Sony WH-1000XM</strong>
+                <span>Serial number added</span>
+              </div>
+              <button class="icon-button" aria-label="Edit item">
+                <i data-lucide="pencil"></i>
+              </button>
+            </section>
+          </section>
+
+          <section class="screen" data-screen="warranties" aria-label="Warranties screen">
+            <header class="topbar">
+              <div>
+                <p class="kicker">Protected purchases</p>
+                <h2>Warranties</h2>
+              </div>
+              <button class="icon-button" aria-label="Add warranty">
+                <i data-lucide="plus"></i>
+              </button>
+            </header>
+
+            <section class="warranty-meter">
+              <div>
+                <span>Coverage value</span>
+                <strong>$1,827</strong>
+              </div>
+              <i data-lucide="shield"></i>
+            </section>
+
+            <div class="warranty-list">
+              <article>
+                <span class="progress" style="--value: 72%"></span>
+                <div>
+                  <strong>MacBook charger</strong>
+                  <p>Apple • expires in 72 days</p>
+                </div>
+                <b>$79</b>
+              </article>
+              <article>
+                <span class="progress amber-bar" style="--value: 38%"></span>
+                <div>
+                  <strong>Sony headphones</strong>
+                  <p>Best Buy • return in 30 days</p>
+                </div>
+                <b>$249</b>
+              </article>
+              <article>
+                <span class="progress coral-bar" style="--value: 14%"></span>
+                <div>
+                  <strong>Air fryer</strong>
+                  <p>Costco • expires in 18 days</p>
+                </div>
+                <b>$119</b>
+              </article>
+            </div>
+          </section>
+
+          <section class="screen" data-screen="search" aria-label="Search screen">
+            <header class="topbar">
+              <div>
+                <p class="kicker">Find proof fast</p>
+                <h2>Search</h2>
+              </div>
+              <button class="icon-button" aria-label="Filter receipts">
+                <i data-lucide="sliders-horizontal"></i>
+              </button>
+            </header>
+
+            <label class="search-box">
+              <i data-lucide="search"></i>
+              <input value="headphones" aria-label="Search receipts" />
+            </label>
+
+            <section class="filter-chips" aria-label="Search filters">
+              <button class="active">All</button>
+              <button>Returns</button>
+              <button>Warranty</button>
+              <button>Business</button>
+            </section>
+
+            <section class="result-card" data-go="receipt">
+              <div class="mini-receipt"></div>
+              <div>
+                <span>Best Buy</span>
+                <strong>Sony headphones</strong>
+                <p>Receipt, warranty, and return date saved.</p>
+              </div>
+            </section>
+
+            <section class="result-card">
+              <div class="mini-receipt target"></div>
+              <div>
+                <span>Target</span>
+                <strong>Kids headphones</strong>
+                <p>Return window expires in 4 days.</p>
+              </div>
+            </section>
+          </section>
+
+          <section class="screen" data-screen="upgrade" aria-label="Upgrade screen">
+            <header class="topbar compact">
+              <button class="icon-button" data-go="home" aria-label="Back home">
+                <i data-lucide="chevron-left"></i>
+              </button>
+              <h2>ReceiptVault Plus</h2>
+              <span></span>
+            </header>
+
+            <section class="plan-hero">
+              <p>Protect every purchase</p>
+              <h3>$4.99</h3>
+              <span>per month</span>
+            </section>
+
+            <div class="plan-features">
+              <article><i data-lucide="archive"></i><span>1,000 stored receipts</span></article>
+              <article><i data-lucide="shield-check"></i><span>Unlimited warranty tracking</span></article>
+              <article><i data-lucide="bell-ring"></i><span>Return and warranty reminders</span></article>
+              <article><i data-lucide="file-down"></i><span>CSV and PDF exports</span></article>
+            </div>
+
+            <button class="primary-button">
+              <i data-lucide="badge-check"></i>
+              Start Plus
+            </button>
+          </section>
+
+          <nav class="tabbar" aria-label="Primary navigation">
+            <button class="tab active" data-go="home" aria-label="Home">
+              <i data-lucide="home"></i>
+              <span>Home</span>
+            </button>
+            <button class="tab" data-go="search" aria-label="Search">
+              <i data-lucide="search"></i>
+              <span>Search</span>
+            </button>
+            <button class="tab center" data-go="scan" aria-label="Scan">
+              <i data-lucide="scan-line"></i>
+            </button>
+            <button class="tab" data-go="warranties" aria-label="Warranties">
+              <i data-lucide="shield-check"></i>
+              <span>Warranty</span>
+            </button>
+            <button class="tab" data-go="upgrade" aria-label="Upgrade">
+              <i data-lucide="sparkles"></i>
+              <span>Plus</span>
+            </button>
+          </nav>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
