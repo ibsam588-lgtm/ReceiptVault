@@ -165,6 +165,22 @@ async function convertRegionPrices(accessToken, price) {
   return await request(accessToken, "POST", url, { price });
 }
 
+async function regionalPricing(accessToken, product) {
+  const price = moneyFromUsd(product.price);
+  try {
+    return await convertRegionPrices(accessToken, price);
+  } catch (error) {
+    if (error.status !== 403) throw error;
+    console.log(`${product.id}: convertRegionPrices is permission-denied; using US-only pricing fallback`);
+    return {
+      regionVersion: { version: "2022/02" },
+      convertedRegionPrices: {
+        US: { price }
+      }
+    };
+  }
+}
+
 function subscriptionBody(product, conversion) {
   const regionalConfigs = Object.entries(conversion.convertedRegionPrices ?? {}).map(
     ([regionCode, converted]) => ({
@@ -251,7 +267,7 @@ async function main() {
       continue;
     }
 
-    const conversion = await convertRegionPrices(accessToken, moneyFromUsd(product.price));
+    const conversion = await regionalPricing(accessToken, product);
     const updated = await patchSubscription(accessToken, product, conversion);
     const updatedPlan = updated.basePlans?.find((basePlan) => basePlan.basePlanId === "standard");
     console.log(`${product.id}: configured standard base plan (${updatedPlan?.state ?? "unknown state"})`);

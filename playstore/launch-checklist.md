@@ -14,6 +14,9 @@
 - Run the `Configure Play subscriptions` GitHub Action to create or patch the
   subscriptions through the Android Publisher API and activate each `standard`
   base plan.
+- If the action logs a US-only pricing fallback, expand regional availability
+  in Play Console or resolve `pricing:convertRegionPrices` access before
+  production rollout.
 - Confirm the Android app can query the live Google Play Billing products on
   the internal testing track.
 - Add the Google Play service account JSON as the Cloudflare Worker secret
