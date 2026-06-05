@@ -24,6 +24,7 @@ jobs:
       MICROSOFT_OAUTH_CLIENT_SECRET: ${{ secrets.MICROSOFT_OAUTH_CLIENT_SECRET }}
       YAHOO_OAUTH_CLIENT_ID: ${{ secrets.YAHOO_OAUTH_CLIENT_ID }}
       YAHOO_OAUTH_CLIENT_SECRET: ${{ secrets.YAHOO_OAUTH_CLIENT_SECRET }}
+      GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
     defaults:
       run:
         working-directory: cloudflare/receiptvault-backup
@@ -75,6 +76,10 @@ jobs:
       - name: Configure Yahoo OAuth client secret
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.YAHOO_OAUTH_CLIENT_SECRET != ''
         run: echo "$YAHOO_OAUTH_CLIENT_SECRET" | npx wrangler secret put YAHOO_OAUTH_CLIENT_SECRET
+
+      - name: Configure Google Play service account
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON != ''
+        run: echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" | npx wrangler secret put GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
 
       - name: Deploy Worker
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
