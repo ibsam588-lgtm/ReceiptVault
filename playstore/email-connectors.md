@@ -1,0 +1,71 @@
+# ReceiptVault Email Connector Requirements
+
+ReceiptVault can support Gmail, Outlook, Yahoo, and other mailbox providers, but
+automatic imports must be implemented as receipt-only processing.
+
+## Product Rules
+
+- Users must opt in separately for each connected mailbox.
+- Users can connect multiple accounts across supported providers.
+- Free users get 1 connected account and 10 automatic receipt/order imports per
+  month.
+- Plus users get up to 3 connected accounts and 250 automatic receipt/order
+  imports per month.
+- Business users get up to 10 connected accounts and 1,000 automatic
+  receipt/order imports per month.
+- Every connected account must show provider, email address, last sync time,
+  monthly import count, sync status, disconnect, and delete imported data.
+
+## Receipt-Only Import Scope
+
+The connector must only store messages that are likely receipts, orders,
+invoices, purchase confirmations, returns, or warranty records.
+
+Recommended flow:
+
+1. Search provider mail using receipt/order keywords, sender allowlists, and
+   recent-date filters.
+2. Read candidate headers and snippets first.
+3. Read body text and attachments only for likely receipt/order candidates.
+4. Run OCR and Gemini 2.5 Flash-Lite categorization only on candidate
+   receipt/order text.
+5. Store only imported receipt/order records, receipt images or PDFs, source
+   provider, message id, merchant, purchase date, total, category, return date,
+   warranty candidate, and confidence.
+6. Discard non-receipt message headers, snippets, bodies, attachments, and AI
+   outputs immediately.
+
+## Provider Scope Notes
+
+- Gmail: automatic background import likely requires `gmail.readonly`, which is
+  a restricted scope. Use the narrowest viable scope, complete OAuth
+  verification, and complete any required security assessment before production.
+- Outlook: use delegated Microsoft Graph permissions for the signed-in user's
+  mailbox. Start with header/search access where possible and request broader
+  mail read access only when body text or attachments are needed for confirmed
+  candidates.
+- Yahoo and generic IMAP: use OAuth where the provider supports it. If IMAP
+  technically exposes the mailbox, ReceiptVault must still apply the
+  receipt-only search, discard, disclosure, and deletion rules above.
+
+## Play And OAuth Compliance
+
+- Add a prominent in-app disclosure before account connection.
+- Explain that ReceiptVault searches for receipt/order messages only.
+- Explain what data is stored, where it is stored, and how to disconnect/delete.
+- Do not use mailbox data for ads, resale, surveillance, or unrelated
+  profiling.
+- Do not ship Google OAuth login in an embedded webview. Use provider-supported
+  OAuth flows.
+- Keep API keys and provider refresh tokens server-side or encrypted according
+  to provider requirements.
+- Update Play Data Safety and the privacy policy before enabling production
+  connector access.
+
+Official references:
+
+- Google Play User Data policy: https://support.google.com/googleplay/android-developer/answer/10144311
+- Google API Services User Data Policy: https://developers.google.com/terms/api-services-user-data-policy
+- Gmail API scopes: https://developers.google.com/workspace/gmail/api/auth/scopes
+- Gmail API services user data policy: https://developers.google.com/gmail/api/policy
+- Microsoft Graph permissions: https://learn.microsoft.com/en-us/graph/permissions-reference

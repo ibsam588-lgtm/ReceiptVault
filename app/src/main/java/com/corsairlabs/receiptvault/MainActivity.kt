@@ -610,15 +610,20 @@ private fun PlusScreen() {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text("ReceiptVault Plus", color = Color.White.copy(alpha = 0.78f))
-                    Text("$4.99", color = Color.White, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
+                    Text("${'$'}4.99", color = Color.White, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
                     Text("per month", color = Color.White.copy(alpha = 0.78f))
+                    Text("${'$'}47.99 yearly", color = Color.White.copy(alpha = 0.78f), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
         item { FeatureRow("1,000 stored receipts", Icons.Default.CheckCircle) }
+        item { FeatureRow("Cloud backup with R2", Icons.Default.Shield) }
+        item { FeatureRow("Gemini receipt categorization", Icons.Default.Star) }
+        item { FeatureRow("3 connected email accounts", Icons.Default.Email) }
+        item { FeatureRow("250 receipt email imports monthly", Icons.Default.Email) }
         item { FeatureRow("Unlimited warranty tracking", Icons.Default.Shield) }
         item { FeatureRow("Return and warranty reminders", Icons.Default.DateRange) }
-        item { FeatureRow("CSV and PDF exports", Icons.Default.Star) }
+        item { FeatureRow("CSV and PDF exports", Icons.Default.CheckCircle) }
         item {
             Button(
                 onClick = {},

@@ -20,3 +20,7 @@ Suggested Play Console setup:
 The Play Console app itself still needs to be created manually inside the
 Corsair Labs Google Play Console account. After the app exists, add Google Play
 Billing subscription product IDs and wire them into the Plus screen.
+
+Use `email-connectors.md` before enabling automatic Gmail, Outlook, Yahoo, or
+IMAP imports. The current store listing should only advertise connector features
+that are already implemented, disclosed, and reflected in Data Safety.

@@ -25,27 +25,38 @@ Core promise:
 
 - Android receipt photo capture.
 - On-device OCR using Google ML Kit Text Recognition.
-- Automatic labels for merchant, date, amount, category, and location when available.
+- Server-side AI categorization with Gemini 2.5 Flash-Lite after OCR text is extracted.
+- Automatic labels for merchant, date, amount, category, warranty, and location when available.
 - Secure receipt image storage.
 - Receipt search and filters.
 - Warranty and return-date reminders.
 - Simple monthly expense totals.
 - Free and paid subscription tiers through Google Play Billing.
+- Optional receipt-only email connectors for Gmail, Outlook, Yahoo, and other mailboxes after OAuth and Play disclosures are complete.
 
 ## Revenue Model
 
-- Free: 50 stored receipts, 5 warranty items, basic OCR, basic search.
-- Plus: $4.99/month or $39.99/year, 1,000 receipts, unlimited warranties,
-  reminders, advanced search, CSV/PDF export.
-- Pro can be added later for freelancers and small businesses.
+- Free: $0, local-first storage, 50 stored receipts, 5 warranty items,
+  manual camera/image/share imports, 10 automatic email receipt imports per month,
+  basic OCR, and basic categories.
+- Plus: $4.99/month or $47.99/year, 1,000 receipts, Cloudflare R2 backup,
+  up to 3 connected email accounts, 250 automatic email receipt imports per month,
+  unlimited warranties, reminders, advanced search, CSV/PDF export, and Gemini
+  categorization.
+- Business: $12.99/month or $124.99/year, higher receipt and email import limits,
+  up to 10 connected email accounts, business folders, tax/export reports, and
+  priority support.
 
 ## Android Stack
 
 - App: Kotlin, Jetpack Compose, Android camera/photo picker contracts.
 - OCR: Google ML Kit Text Recognition through Google Play Services.
+- AI categorization: Gemini 2.5 Flash-Lite through the Cloudflare Worker, keeping
+  the Gemini API key off the Android client.
 - Storage: local private app storage for receipt images.
 - Data: local shared preferences JSON for MVP receipt metadata.
 - Billing: Google Play Billing will be added after the Play Console app and product IDs exist.
+- Cloud backup: Cloudflare Worker plus R2, gated by Firebase Auth and paid plan claims.
 
 ## Built Features
 
@@ -56,6 +67,18 @@ Core promise:
 - On-device OCR text extraction through ML Kit.
 - Automatic merchant, date, amount, category, return date, and warranty suggestions.
 - Local receipt vault, search, warranty screen, detail view, and Plus plan screen.
+
+## Email Connector Policy
+
+Automatic mailbox connectors must only import messages that are likely receipts,
+orders, invoices, purchase confirmations, or warranty documents. The connector
+should use provider search and header/snippet checks before reading body text or
+attachments, discard non-receipt messages immediately, and store only receipt or
+order data the user can see in ReceiptVault.
+
+Users should be able to connect multiple accounts, including Gmail, Outlook,
+Yahoo, and other OAuth or IMAP-compatible providers. Each account must have its
+own consent, import limit, sync status, disconnect action, and delete-data action.
 
 ## Build And Run
 

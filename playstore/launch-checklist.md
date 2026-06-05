@@ -10,6 +10,12 @@
 - Complete content rating questionnaire and target audience forms.
 - Create Plus subscription products if launching paid plan.
 - Add Google Play Billing product IDs to the Android app.
+- If launching automatic email connectors, add the prominent consent screen,
+  per-account disconnect/delete controls, and update Data Safety before upload.
+- If launching Gmail sync, complete OAuth verification for the restricted Gmail
+  scope and any required security assessment before production access.
+- Add the Gemini server secret to the Worker environment after billing and
+  data-safety disclosures are ready: `GEMINI_API_KEY`.
 - Add the Google Play service account JSON as the GitHub secret
   `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
 - Add Cloudflare deployment secrets: `CLOUDFLARE_API_TOKEN` and

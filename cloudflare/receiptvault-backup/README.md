@@ -2,6 +2,9 @@
 
 Cloudflare Worker API for paid ReceiptVault backups in R2.
 
+The Worker also provides the server-side AI categorization endpoint so Gemini
+keys are never shipped in the Android app.
+
 ## Resources
 
 - Worker name: `receiptvault-backup`
@@ -23,5 +26,28 @@ GitHub Actions requires these repository secrets:
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
+Runtime secrets and variables:
+
+- `GEMINI_API_KEY`: secret used by `/v1/ai/categorize`.
+- `GEMINI_MODEL`: optional model override. Default is `gemini-2.5-flash-lite`.
+
 The Worker checks Firebase ID tokens and requires a Plus/pro custom claim when
 `REQUIRE_PLUS_CLAIM=true`.
+
+## AI Categorization
+
+`POST /v1/ai/categorize` requires a Firebase bearer token and accepts:
+
+```json
+{
+  "ocrText": "receipt or order text",
+  "emailSubject": "optional email subject",
+  "emailFrom": "optional sender",
+  "emailDate": "optional message date"
+}
+```
+
+The endpoint asks Gemini 2.5 Flash-Lite to return structured JSON for merchant,
+total, purchase date, category, warranty candidate, return window, and
+confidence. Non-receipt text should return `isReceipt: false` with low
+confidence.
