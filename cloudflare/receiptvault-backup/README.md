@@ -8,6 +8,7 @@ keys are never shipped in the Android app.
 ## Resources
 
 - Worker name: `receiptvault-backup`
+- Worker URL: `https://receiptvault-backup.everytools4u.workers.dev`
 - R2 bucket: `receiptvault-receipts`
 - Firebase project: `receiptvault-corsair`
 
@@ -41,6 +42,26 @@ Runtime secrets and variables:
 
 The Worker checks Firebase ID tokens and requires a Plus/pro custom claim when
 `REQUIRE_PLUS_CLAIM=true`.
+
+## Current Provider Setup
+
+Provider configuration verified on 2026-06-05:
+
+- Gmail: configured with the Worker callback
+  `/v1/connectors/oauth/callback/gmail`. This uses Google's restricted
+  `gmail.readonly` scope, so production access requires Google's OAuth
+  restricted-scope verification and any required security assessment.
+- Outlook: configured with the Worker callback
+  `/v1/connectors/oauth/callback/outlook`. The Microsoft Entra app is
+  `ReceiptVault Outlook Connector` with delegated Graph `User.Read` and
+  `Mail.Read`. The current client secret expires on 2026-12-02.
+- Yahoo: configured with the Worker callback
+  `/v1/connectors/oauth/callback/yahoo`.
+- Other IMAP: listed in provider metadata, but not configured for live OAuth or
+  IMAP import yet.
+
+Do not commit provider client secrets or token encryption keys. Keep them in
+GitHub repository secrets and Cloudflare Worker secrets only.
 
 ## AI Categorization
 

@@ -71,9 +71,34 @@ Core promise:
 - Email connector screen for Gmail, Outlook, Yahoo, and IMAP account tracking,
   sync status, disconnect, delete-data controls, and plan limit enforcement.
 - OAuth launch flow for Gmail, Outlook, and Yahoo through the Cloudflare Worker,
-  with encrypted server-side connector token storage once provider credentials
-  are configured.
+  with encrypted server-side connector token storage.
 - Local receipt vault, search, warranty screen, detail view, and Plus plan screen.
+
+## Live Environment
+
+- Android package: `com.corsairlabs.receiptvault`.
+- Firebase project: `receiptvault-corsair`.
+- Cloudflare Worker: `https://receiptvault-backup.everytools4u.workers.dev`.
+- GitHub Actions deploy workflow: `.github/workflows/cloudflare-worker.yml`.
+- Worker deploy branch: `codex/receiptvault-android`.
+
+Current connector status, verified on 2026-06-05:
+
+- Gmail: configured. Uses `gmail.readonly` and the receipt-only search query
+  `newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty)`.
+  Public production use still needs Google OAuth restricted-scope verification,
+  and Google may require a security assessment.
+- Outlook: configured. Microsoft Entra app `ReceiptVault Outlook Connector`
+  uses delegated Microsoft Graph `User.Read` and `Mail.Read`. The current
+  client secret expires on 2026-12-02 and must be renewed before that date.
+- Yahoo: configured. Uses the Worker Yahoo OAuth callback and receipt/order
+  import flow.
+- Other IMAP: not configured yet. This still needs provider-specific OAuth or
+  IMAP credentials before it can be offered as a live connector.
+
+Gemini 2.5 Flash-Lite is configured through the Worker secret. AI Studio
+billing/prepay must be active for live Gemini calls; if Gemini is unavailable,
+the app falls back to local OCR parsing.
 
 ## Email Connector Policy
 
@@ -117,6 +142,7 @@ Open `index.html` in a browser to view the original clickable design prototype.
 ## Play Store Prep
 
 Play Store listing copy, data safety notes, and launch checklist are in `playstore/`.
-The Play Console app cannot be created from code alone; it must be created inside
-the Corsair Labs Google Play Console account, then wired to this project using
-the final app signing, package name, subscription product IDs, and privacy URL.
+The Play Console app exists and internal-track upload is handled by GitHub
+Actions when the Google Play service account secret is present. Product IDs,
+subscription pricing, policy declarations, and public rollout approvals still
+need final Play Console review before production launch.
