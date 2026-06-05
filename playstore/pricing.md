@@ -45,7 +45,7 @@ Price: $12.99/month or $124.99/year
 - Priority support.
 
 Google Play Billing product IDs should be created after the Play Console app is
-created. Suggested IDs:
+created. The Android app is already wired to these IDs:
 
 - `receiptvault_plus_monthly`
 - `receiptvault_plus_yearly`
@@ -56,3 +56,9 @@ Annual pricing is set to roughly 20% off monthly pricing:
 
 - Plus monthly for 12 months: $59.88. Yearly: $47.99.
 - Business monthly for 12 months: $155.88. Yearly: $124.99.
+
+Production billing verification requires the Cloudflare Worker secret
+`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`. The app sends completed subscription purchase
+tokens to `/v1/billing/google-play/purchase`; the Worker verifies them with the
+Google Play Developer API and stores the active Plus/Business entitlement for R2
+backup access.

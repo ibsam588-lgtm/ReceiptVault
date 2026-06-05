@@ -8,6 +8,7 @@ firebaseBom = "33.7.0"
 googleServices = "4.4.2"
 lifecycle = "2.8.7"
 mlkitText = "19.0.1"
+playBilling = "9.0.0"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
@@ -27,6 +28,7 @@ androidx-compose-material-icons = { group = "androidx.compose.material", name = 
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth-ktx" }
 mlkit-text-recognition = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition", version.ref = "mlkitText" }
+play-billing = { group = "com.android.billingclient", name = "billing", version.ref = "playBilling" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espresso" }

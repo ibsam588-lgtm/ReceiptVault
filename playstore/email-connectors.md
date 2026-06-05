@@ -37,17 +37,24 @@ Recommended flow:
 7. Discard non-receipt message headers, snippets, bodies, attachments, and AI
    outputs immediately.
 
-## Background Import Worker Still Needed
+## Background Sync Status
 
-Credential setup is live for Gmail, Outlook, Yahoo, and manual IMAP. The
-production importer still needs a scheduled Worker or queue consumer that:
+Credential setup is live for Gmail, Outlook, Yahoo, and manual IMAP. The Worker
+now has:
 
 - Reads encrypted provider tokens/settings from R2.
 - Searches only the provider's receipt/order query.
-- Calls `/v1/connectors/candidate` before reading body text or attachments.
-- Imports only eligible receipt/order records and attachment images/PDFs.
-- Applies Free, Plus, and Business monthly import limits per connected account.
 - Records last sync time, imported count, and disconnect/delete state.
+- Runs a scheduled scan every 30 minutes for indexed connector users.
+- Stores sync reports without storing unrelated mailbox content.
+
+The production importer still needs:
+
+- Candidate-only body/attachment reading after header/snippet checks pass.
+- OCR and Gemini categorization for eligible receipt/order attachments.
+- Storage of imported receipt/order records and attachment images/PDFs only.
+- Free, Plus, and Business monthly import limit enforcement in the Worker.
+- Provider-specific IMAP polling for Yahoo/manual IMAP.
 
 ## Provider Scope Notes
 

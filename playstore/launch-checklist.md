@@ -8,8 +8,14 @@
 - Add privacy policy URL under the Corsair Labs or Firebase Hosting URL.
 - Complete Data Safety using `data-safety-notes.md`.
 - Complete content rating questionnaire and target audience forms.
-- Create Plus subscription products if launching paid plan.
-- Add Google Play Billing product IDs to the Android app.
+- Create Google Play subscription products and base plans:
+  `receiptvault_plus_monthly`, `receiptvault_plus_yearly`,
+  `receiptvault_business_monthly`, `receiptvault_business_yearly`.
+- Confirm the Android app can query the live Google Play Billing products on
+  the internal testing track.
+- Add the Google Play service account JSON as the Cloudflare Worker secret
+  `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` so server-side subscription verification
+  can unlock R2 backup.
 - If launching automatic email connectors, confirm the prominent mailbox
   consent screen, per-account disconnect/delete controls, and updated Data
   Safety are present in the release.

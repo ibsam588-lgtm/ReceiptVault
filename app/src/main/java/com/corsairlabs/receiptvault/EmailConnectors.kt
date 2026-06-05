@@ -101,10 +101,17 @@ data class ImapManualConfig(
     val useTls: Boolean
 )
 
+data class ConnectorSyncSummary(
+    val scanned: Int,
+    val candidates: Int,
+    val imported: Int,
+    val message: String
+)
+
 class EmailConnectorStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("receiptvault_email_connectors", Context.MODE_PRIVATE)
 
-    fun currentPlan(): ReceiptVaultPlan = ReceiptVaultPlan.Free
+    fun currentPlan(): ReceiptVaultPlan = receiptVaultPlanFromActiveProducts(context)
 
     fun loadAccounts(): List<EmailConnectorAccount> {
         val raw = prefs.getString("accounts", "[]") ?: "[]"
@@ -153,20 +160,31 @@ class EmailConnectorStore(private val context: Context) {
         return ConnectorStoreResult(updated, "${provider.label} connector added.")
     }
 
-    fun markSyncReady(id: String): ConnectorStoreResult {
+    fun markSyncReady(
+        id: String,
+        scanned: Int = 0,
+        candidates: Int = 0,
+        imported: Int = 0,
+        message: String = "Receipt-only sync check completed."
+    ): ConnectorStoreResult {
         val updated = loadAccounts().map { account ->
             if (account.id == id) {
                 account.copy(
                     status = ConnectorStatus.SyncReady,
                     lastSyncMillis = System.currentTimeMillis(),
-                    lastMessage = "Receipt/order-only query is ready. Live import starts after OAuth approval."
+                    monthlyImportCount = account.monthlyImportCount + imported,
+                    lastMessage = if (scanned > 0 || candidates > 0 || imported > 0) {
+                        "Scanned $scanned messages, found $candidates receipt candidates, imported $imported."
+                    } else {
+                        message
+                    }
                 )
             } else {
                 account
             }
         }
         saveAccounts(updated)
-        return ConnectorStoreResult(updated, "Receipt-only sync check completed.")
+        return ConnectorStoreResult(updated, message)
     }
 
     fun disconnect(id: String): ConnectorStoreResult {

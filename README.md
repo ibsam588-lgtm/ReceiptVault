@@ -55,7 +55,9 @@ Core promise:
   the Gemini API key off the Android client.
 - Storage: local private app storage for receipt images.
 - Data: local shared preferences JSON for MVP receipt metadata.
-- Billing: Google Play Billing will be added after the Play Console app and product IDs exist.
+- Billing: Google Play Billing Library with subscription product IDs for Plus
+  and Business, plus Worker-side Google Play token verification when the service
+  account secret is configured.
 - Cloud backup: Cloudflare Worker plus R2, gated by Firebase Auth and paid plan claims.
 
 ## Built Features
@@ -72,6 +74,10 @@ Core promise:
   sync status, disconnect, delete-data controls, and plan limit enforcement.
 - OAuth launch flow for Gmail, Outlook, and Yahoo through the Cloudflare Worker,
   with encrypted server-side connector token storage.
+- Google Play Billing subscription cards for Plus monthly/yearly and Business
+  monthly/yearly, using live Play pricing when the products are active.
+- Worker endpoint for Google Play purchase verification:
+  `POST /v1/billing/google-play/purchase`.
 - Local receipt vault, search, warranty screen, detail view, and Plus plan screen.
 
 ## Live Environment
@@ -106,11 +112,22 @@ the app falls back to local OCR parsing.
 Gemini billing/prepay setup link for the current AI Studio project:
 `https://aistudio.google.com/billing?project=gen-lang-client-0123839677&billing=012A8C-6B3188-636287`
 
-Automatic mailbox polling/import jobs are not part of the MVP runtime yet. The
-current connector work stores OAuth/IMAP credentials and applies receipt-only
-candidate checks; the production sync worker still needs to fetch provider
-messages, call `/v1/connectors/candidate`, discard non-receipts, and import only
-eligible receipt/order records.
+Full automatic mailbox import is not part of the MVP runtime yet. The current
+connector work stores OAuth/IMAP credentials, runs scheduled Gmail and Outlook
+receipt-query candidate scans, writes encrypted sync reports, and keeps
+Yahoo/IMAP marked ready without reading mailbox content. Full body/attachment
+import still needs the candidate-only importer before receipt/order records are
+created automatically.
+
+Google Play Billing product IDs:
+
+- `receiptvault_plus_monthly`
+- `receiptvault_plus_yearly`
+- `receiptvault_business_monthly`
+- `receiptvault_business_yearly`
+
+Worker secret still needed for production subscription verification:
+`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
 
 ## Email Connector Policy
 
@@ -158,5 +175,5 @@ The Play Console app exists and internal-track upload is handled by GitHub
 Actions when the Google Play service account secret is present. CI builds assign
 a unique Play `versionCode` from the GitHub run number so repeated internal-track
 uploads are not rejected. Product IDs, subscription pricing, policy declarations,
-and public rollout approvals still need final Play Console review before
-production launch.
+Gemini prepay, Gmail verification, and public rollout approvals still need final
+Play Console or provider review before production launch.

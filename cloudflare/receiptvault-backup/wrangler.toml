@@ -6,6 +6,10 @@ compatibility_date = "2026-06-04"
 FIREBASE_PROJECT_ID = "receiptvault-corsair"
 REQUIRE_PLUS_CLAIM = "true"
 GEMINI_MODEL = "gemini-2.5-flash-lite"
+GOOGLE_PLAY_PACKAGE_NAME = "com.corsairlabs.receiptvault"
+
+[triggers]
+crons = ["*/30 * * * *"]
 
 [[r2_buckets]]
 binding = "RECEIPTS_BUCKET"

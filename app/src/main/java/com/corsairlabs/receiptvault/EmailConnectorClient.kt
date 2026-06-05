@@ -37,6 +37,13 @@ class EmailConnectorClient {
         }.getOrDefault(false)
     }
 
+    suspend fun syncProvider(provider: EmailProvider): ConnectorSyncSummary? {
+        return runCatching {
+            val token = firebaseToken()
+            postSync(token, provider)
+        }.getOrNull()
+    }
+
     private suspend fun firebaseToken(): String {
         val user = auth.currentUser ?: auth.signInAnonymously().await().user
         val token = (user ?: throw IOException("Firebase anonymous auth unavailable"))
@@ -96,6 +103,38 @@ class EmailConnectorClient {
         val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (connection.responseCode !in 200..299) throw IOException(response)
         true
+    }
+
+    private suspend fun postSync(token: String, provider: EmailProvider): ConnectorSyncSummary = withContext(Dispatchers.IO) {
+        val connection = (URL("$apiBase/v1/connectors/sync").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10000
+            readTimeout = 25000
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+        }
+
+        val body = JSONObject()
+            .put("provider", provider.providerId)
+            .put("maxCandidates", 10)
+            .toString()
+        connection.outputStream.use { output ->
+            output.write(body.toByteArray(Charsets.UTF_8))
+        }
+
+        val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+        val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (connection.responseCode !in 200..299) throw IOException(response)
+
+        val reports = JSONObject(response).optJSONArray("reports")
+        val report = reports?.optJSONObject(0)
+        ConnectorSyncSummary(
+            scanned = report?.optInt("scanned", 0) ?: 0,
+            candidates = report?.optInt("candidates", 0) ?: 0,
+            imported = report?.optInt("imported", 0) ?: 0,
+            message = report?.optString("message", "Receipt-only sync check completed.") ?: "Receipt-only sync check completed."
+        )
     }
 
     private suspend fun deleteConnectorToken(token: String, provider: EmailProvider): Boolean = withContext(Dispatchers.IO) {

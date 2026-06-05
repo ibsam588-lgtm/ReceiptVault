@@ -1,7 +1,9 @@
 package com.corsairlabs.receiptvault
 
 import android.app.Application
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -117,6 +119,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.roundToLong
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -221,6 +224,8 @@ private fun ReceiptVaultApp(
 ) {
     val receipts by viewModel.receipts.collectAsState()
     val emailAccounts by viewModel.emailAccounts.collectAsState()
+    val activePlan by viewModel.activePlan.collectAsState()
+    val billingState by viewModel.billingState.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
     val message by viewModel.message.collectAsState()
     val pendingExternalUrl by viewModel.pendingExternalUrl.collectAsState()
@@ -299,14 +304,17 @@ private fun ReceiptVaultApp(
                 AppScreen.Warranties -> WarrantyScreen(receipts)
                 AppScreen.Email -> EmailConnectorsScreen(
                     accounts = emailAccounts,
-                    plan = viewModel.activePlan,
+                    plan = activePlan,
                     onConnect = viewModel::connectEmailProvider,
                     onConnectImap = viewModel::connectManualImap,
                     onSync = viewModel::syncEmailAccount,
                     onDisconnect = viewModel::disconnectEmailAccount,
                     onDeleteData = viewModel::deleteEmailAccountData
                 )
-                AppScreen.Plus -> PlusScreen()
+                AppScreen.Plus -> PlusScreen(
+                    billingState = billingState,
+                    onPurchase = viewModel::purchaseBillingProduct
+                )
                 AppScreen.Detail -> ReceiptDetailScreen(
                     receipt = viewModel.selectedReceipt ?: receipts.firstOrNull(),
                     onBack = { onScreenChange(AppScreen.Home) }
@@ -957,7 +965,12 @@ private fun connectorStatusColor(status: ConnectorStatus): Color {
 }
 
 @Composable
-private fun PlusScreen() {
+private fun PlusScreen(
+    billingState: ReceiptVaultBillingState,
+    onPurchase: (Activity, ReceiptVaultBillingProduct) -> Unit
+) {
+    val activity = LocalContext.current.findActivity()
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
@@ -981,6 +994,23 @@ private fun PlusScreen() {
                 }
             }
         }
+        item {
+            Text(
+                billingState.message,
+                color = Muted,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        items(billingState.offers, key = { it.product.productId }) { offer ->
+            BillingOfferCard(
+                offer = offer,
+                canLaunchPurchase = activity != null && offer.available && !offer.active,
+                onPurchase = {
+                    val launchActivity = activity ?: return@BillingOfferCard
+                    onPurchase(launchActivity, offer.product)
+                }
+            )
+        }
         item { FeatureRow("1,000 stored receipts", Icons.Default.CheckCircle) }
         item { FeatureRow("Cloud backup with R2", Icons.Default.Shield) }
         item { FeatureRow("Gemini receipt categorization", Icons.Default.Star) }
@@ -989,22 +1019,49 @@ private fun PlusScreen() {
         item { FeatureRow("Unlimited warranty tracking", Icons.Default.Shield) }
         item { FeatureRow("Return and warranty reminders", Icons.Default.DateRange) }
         item { FeatureRow("CSV and PDF exports", Icons.Default.CheckCircle) }
-        item {
+    }
+}
+
+@Composable
+private fun BillingOfferCard(
+    offer: BillingPlanOffer,
+    canLaunchPurchase: Boolean,
+    onPurchase: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(offer.product.title, fontWeight = FontWeight.ExtraBold)
+                    Text(offer.product.cadence, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(
+                    offer.displayPrice,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (offer.active) TealDark else Ink
+                )
+            }
+            Text(offer.product.description, color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Product ID: ${offer.product.productId}",
+                color = Muted,
+                style = MaterialTheme.typography.labelSmall
+            )
             Button(
-                onClick = {},
+                onClick = onPurchase,
+                enabled = canLaunchPurchase,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Teal),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("Connect Google Play Billing")
+                Text(
+                    when {
+                        offer.active -> "Active"
+                        offer.available -> "Subscribe"
+                        else -> "Create in Play Console"
+                    }
+                )
             }
-        }
-        item {
-            Text(
-                "Billing is intentionally stubbed for the first app build. The next step is adding Google Play Billing product IDs after the Play Console app exists.",
-                color = Muted,
-                style = MaterialTheme.typography.bodySmall
-            )
         }
     }
 }
@@ -1425,6 +1482,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     private val store = ReceiptStore(application)
     private val connectorStore = EmailConnectorStore(application)
     private val connectorClient = EmailConnectorClient()
+    private val playBillingClient = PlayBillingClient(application)
     private val ocrScanner = OcrScanner(application)
     private val aiClient = ReceiptAiClient(application)
     private val parser = ReceiptParser()
@@ -1435,7 +1493,10 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     private val _emailAccounts = MutableStateFlow(connectorStore.loadAccounts())
     val emailAccounts: StateFlow<List<EmailConnectorAccount>> = _emailAccounts
 
-    val activePlan: ReceiptVaultPlan = connectorStore.currentPlan()
+    private val _activePlan = MutableStateFlow(connectorStore.currentPlan())
+    val activePlan: StateFlow<ReceiptVaultPlan> = _activePlan
+
+    val billingState: StateFlow<ReceiptVaultBillingState> = playBillingClient.state
 
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy
@@ -1449,6 +1510,15 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     private var selectedReceiptId by mutableStateOf<String?>(_receipts.value.firstOrNull()?.id)
     val selectedReceipt: Receipt?
         get() = _receipts.value.firstOrNull { it.id == selectedReceiptId }
+
+    init {
+        playBillingClient.start()
+        viewModelScope.launch {
+            billingState.collect {
+                _activePlan.value = connectorStore.currentPlan()
+            }
+        }
+    }
 
     suspend fun importReceipt(uri: Uri, source: ImportSource): Receipt? {
         _isBusy.value = true
@@ -1556,9 +1626,32 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun syncEmailAccount(id: String) {
-        val result = connectorStore.markSyncReady(id)
-        _emailAccounts.value = result.accounts
-        _message.value = result.message
+        val account = _emailAccounts.value.firstOrNull { it.id == id } ?: return
+        _isBusy.value = true
+        viewModelScope.launch {
+            try {
+                val summary = connectorClient.syncProvider(account.provider)
+                val result = if (summary != null) {
+                    connectorStore.markSyncReady(
+                        id = id,
+                        scanned = summary.scanned,
+                        candidates = summary.candidates,
+                        imported = summary.imported,
+                        message = summary.message
+                    )
+                } else {
+                    connectorStore.markSyncReady(id, message = "Could not reach connector sync. Check OAuth setup and try again.")
+                }
+                _emailAccounts.value = result.accounts
+                _message.value = result.message
+            } finally {
+                _isBusy.value = false
+            }
+        }
+    }
+
+    fun purchaseBillingProduct(activity: Activity, product: ReceiptVaultBillingProduct) {
+        playBillingClient.launchPurchase(activity, product)
     }
 
     fun disconnectEmailAccount(id: String) {
@@ -1591,6 +1684,11 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
 
     fun clearPendingExternalUrl() {
         _pendingExternalUrl.value = null
+    }
+
+    override fun onCleared() {
+        playBillingClient.stop()
+        super.onCleared()
     }
 
     companion object {
@@ -1894,6 +1992,14 @@ private fun createCameraUri(context: Context): Uri {
     val dir = File(context.cacheDir, "camera").apply { mkdirs() }
     val file = File.createTempFile("receipt_", ".jpg", dir)
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+}
+
+private tailrec fun Context.findActivity(): Activity? {
+    return when (this) {
+        is Activity -> this
+        is ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
 }
 
 private fun extractSharedImageUris(intent: Intent?): List<Uri> {

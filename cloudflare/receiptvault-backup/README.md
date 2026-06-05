@@ -39,9 +39,14 @@ Runtime secrets and variables:
   Entra web app credentials for delegated Graph access.
 - `YAHOO_OAUTH_CLIENT_ID` and `YAHOO_OAUTH_CLIENT_SECRET`: Yahoo OAuth app
   credentials.
+- `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`: Google Play service account JSON used to
+  verify subscription purchases server-side.
+- `GOOGLE_PLAY_PACKAGE_NAME`: Android package name. Default/configured value is
+  `com.corsairlabs.receiptvault`.
 
 The Worker checks Firebase ID tokens and requires a Plus/pro custom claim when
-`REQUIRE_PLUS_CLAIM=true`.
+`REQUIRE_PLUS_CLAIM=true`, unless the user has an active verified Google Play
+Plus or Business entitlement stored by the billing endpoint.
 
 ## Current Provider Setup
 
@@ -132,3 +137,36 @@ metadata such as email address, host, port, and TLS preference.
 The response tells the connector whether it may inspect the body or attachments.
 Non-receipt messages must be discarded without storing headers, snippets, body
 text, attachments, or AI outputs.
+
+`POST /v1/connectors/sync` requires a Firebase bearer token and accepts:
+
+```json
+{
+  "provider": "gmail",
+  "maxCandidates": 10
+}
+```
+
+The endpoint scans only provider receipt-query candidates, stores a sync report,
+and does not store unrelated mailbox content. Gmail and Outlook header/snippet
+candidate scans are implemented. Yahoo and manual IMAP are marked ready, but
+provider-specific IMAP polling still needs to be added before body/attachment
+imports are enabled.
+
+`GET /v1/connectors/sync/status` returns the user's stored sync reports.
+
+## Google Play Billing
+
+`POST /v1/billing/google-play/purchase` requires a Firebase bearer token and
+accepts:
+
+```json
+{
+  "productId": "receiptvault_plus_monthly",
+  "purchaseToken": "google-play-purchase-token"
+}
+```
+
+The Worker verifies the subscription token with the Google Play Developer API
+and stores the active Plus or Business entitlement in R2. Configure the Worker
+secret `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` before relying on this in production.

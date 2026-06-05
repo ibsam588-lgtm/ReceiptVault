@@ -83,6 +83,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.mlkit.text.recognition)
+    implementation(libs.play.billing)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 
