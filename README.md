@@ -143,6 +143,8 @@ Open `index.html` in a browser to view the original clickable design prototype.
 
 Play Store listing copy, data safety notes, and launch checklist are in `playstore/`.
 The Play Console app exists and internal-track upload is handled by GitHub
-Actions when the Google Play service account secret is present. Product IDs,
-subscription pricing, policy declarations, and public rollout approvals still
-need final Play Console review before production launch.
+Actions when the Google Play service account secret is present. CI builds assign
+a unique Play `versionCode` from the GitHub run number so repeated internal-track
+uploads are not rejected. Product IDs, subscription pricing, policy declarations,
+and public rollout approvals still need final Play Console review before
+production launch.

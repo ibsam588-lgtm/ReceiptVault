@@ -5,6 +5,14 @@ plugins {
     alias(libs.plugins.google.services)
 }
 
+val configuredVersionCode = (providers.environmentVariable("ANDROID_VERSION_CODE").orNull
+    ?: providers.gradleProperty("ANDROID_VERSION_CODE").orNull)
+    ?.toIntOrNull()
+    ?: 4
+val configuredVersionName = providers.environmentVariable("ANDROID_VERSION_NAME").orNull
+    ?: providers.gradleProperty("ANDROID_VERSION_NAME").orNull
+    ?: "0.1.3"
+
 android {
     namespace = "com.corsairlabs.receiptvault"
     compileSdk = 36
@@ -13,8 +21,8 @@ android {
         applicationId = "com.corsairlabs.receiptvault"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = configuredVersionCode
+        versionName = configuredVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "R2_BACKUP_API_URL", "\"https://receiptvault-backup.everytools4u.workers.dev\"")
     }
