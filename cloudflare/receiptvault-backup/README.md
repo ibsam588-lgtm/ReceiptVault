@@ -54,7 +54,9 @@ Provider configuration verified on 2026-06-05:
 - Outlook: configured with the Worker callback
   `/v1/connectors/oauth/callback/outlook`. The Microsoft Entra app is
   `ReceiptVault Outlook Connector` with delegated Graph `User.Read` and
-  `Mail.Read`. The current client secret expires on 2026-12-02.
+  `Mail.Read`. Microsoft client secrets cannot be set to never expire; the
+  current secret expires on 2026-12-02 and must be rotated or replaced with a
+  certificate/federated credential before that date.
 - Yahoo: configured with the Worker callback
   `/v1/connectors/oauth/callback/yahoo`.
 - Other IMAP: configured through `POST /v1/connectors/imap/manual`. Users supply

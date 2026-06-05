@@ -10,12 +10,18 @@
 - Complete content rating questionnaire and target audience forms.
 - Create Plus subscription products if launching paid plan.
 - Add Google Play Billing product IDs to the Android app.
-- If launching automatic email connectors, add the prominent consent screen,
-  per-account disconnect/delete controls, and update Data Safety before upload.
+- If launching automatic email connectors, confirm the prominent mailbox
+  consent screen, per-account disconnect/delete controls, and updated Data
+  Safety are present in the release.
 - If launching Gmail sync, complete OAuth verification for the restricted Gmail
   scope and any required security assessment before production access.
-- Add the Gemini server secret to the Worker environment after billing and
-  data-safety disclosures are ready: `GEMINI_API_KEY`.
+- Set up Gemini AI Studio billing/prepay for
+  `https://aistudio.google.com/billing?project=gen-lang-client-0123839677&billing=012A8C-6B3188-636287`.
+- Confirm the Gemini server secret is still present in the Worker environment:
+  `GEMINI_API_KEY`.
+- Renew the Microsoft Entra Outlook connector secret before 2026-12-02, or
+  replace it with a certificate/federated credential. Microsoft client secrets
+  cannot be set to never expire.
 - Add the Google Play service account JSON as the GitHub secret
   `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
 - Add Cloudflare deployment secrets: `CLOUDFLARE_API_TOKEN` and

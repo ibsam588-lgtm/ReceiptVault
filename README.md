@@ -89,8 +89,10 @@ Current connector status, verified on 2026-06-05:
   Public production use still needs Google OAuth restricted-scope verification,
   and Google may require a security assessment.
 - Outlook: configured. Microsoft Entra app `ReceiptVault Outlook Connector`
-  uses delegated Microsoft Graph `User.Read` and `Mail.Read`. The current
-  client secret expires on 2026-12-02 and must be renewed before that date.
+  uses delegated Microsoft Graph `User.Read` and `Mail.Read`. Microsoft does
+  not support never-expiring client secrets; the current client secret expires
+  on 2026-12-02 and must be renewed or replaced with a certificate/federated
+  credential before that date.
 - Yahoo: configured. Uses the Worker Yahoo OAuth callback and receipt/order
   import flow.
 - Other IMAP: configured for manual per-user setup. Users provide email, IMAP
@@ -100,6 +102,9 @@ Current connector status, verified on 2026-06-05:
 Gemini 2.5 Flash-Lite is configured through the Worker secret. AI Studio
 billing/prepay must be active for live Gemini calls; if Gemini is unavailable,
 the app falls back to local OCR parsing.
+
+Gemini billing/prepay setup link for the current AI Studio project:
+`https://aistudio.google.com/billing?project=gen-lang-client-0123839677&billing=012A8C-6B3188-636287`
 
 Automatic mailbox polling/import jobs are not part of the MVP runtime yet. The
 current connector work stores OAuth/IMAP credentials and applies receipt-only

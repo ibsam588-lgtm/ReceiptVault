@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -637,6 +638,7 @@ private fun EmailConnectorsScreen(
     var imapUsername by rememberSaveable { mutableStateOf("") }
     var imapPassword by rememberSaveable { mutableStateOf("") }
     var imapUseTls by rememberSaveable { mutableStateOf(true) }
+    var mailboxConsent by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -671,8 +673,19 @@ private fun EmailConnectorsScreen(
             SectionHeader("Connect accounts", "Plan limits", {})
         }
 
+        item {
+            MailboxConsentCard(
+                checked = mailboxConsent,
+                onCheckedChange = { mailboxConsent = it }
+            )
+        }
+
         items(EmailProvider.entries.filter { it != EmailProvider.Imap }, key = { it.name }) { provider ->
-            ProviderConnectCard(provider, onConnect = { onConnect(provider) })
+            ProviderConnectCard(
+                provider = provider,
+                enabled = mailboxConsent,
+                onConnect = { onConnect(provider) }
+            )
         }
 
         item {
@@ -691,7 +704,8 @@ private fun EmailConnectorsScreen(
                 onUseTlsChange = { imapUseTls = it },
                 onConnect = {
                     onConnectImap(imapEmail, imapHost, imapPort, imapUsername, imapPassword, imapUseTls)
-                }
+                },
+                enabled = mailboxConsent
             )
         }
 
@@ -723,7 +737,36 @@ private fun EmailConnectorsScreen(
 }
 
 @Composable
-private fun ProviderConnectCard(provider: EmailProvider, onConnect: () -> Unit) {
+private fun MailboxConsentCard(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onCheckedChange(!checked) }
+                .padding(16.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+            Spacer(Modifier.width(8.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Mailbox access consent", fontWeight = FontWeight.ExtraBold)
+                Text(
+                    "ReceiptVault searches connected mailboxes only for receipts, orders, invoices, returns, and warranty records. Non-receipt messages are discarded and never stored.",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "Imported receipt records can be disconnected or deleted from this screen.",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderConnectCard(provider: EmailProvider, enabled: Boolean, onConnect: () -> Unit) {
     Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -745,6 +788,7 @@ private fun ProviderConnectCard(provider: EmailProvider, onConnect: () -> Unit) 
             Text("Search: ${provider.receiptQuery}", color = Muted, style = MaterialTheme.typography.bodySmall)
             Button(
                 onClick = onConnect,
+                enabled = enabled,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Teal),
                 shape = RoundedCornerShape(8.dp)
@@ -769,7 +813,8 @@ private fun ManualImapConnectCard(
     onUsernameChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onUseTlsChange: (Boolean) -> Unit,
-    onConnect: () -> Unit
+    onConnect: () -> Unit,
+    enabled: Boolean
 ) {
     Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -842,6 +887,7 @@ private fun ManualImapConnectCard(
             }
             Button(
                 onClick = onConnect,
+                enabled = enabled,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = Teal),
                 shape = RoundedCornerShape(8.dp)

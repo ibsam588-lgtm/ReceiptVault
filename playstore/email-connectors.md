@@ -37,6 +37,18 @@ Recommended flow:
 7. Discard non-receipt message headers, snippets, bodies, attachments, and AI
    outputs immediately.
 
+## Background Import Worker Still Needed
+
+Credential setup is live for Gmail, Outlook, Yahoo, and manual IMAP. The
+production importer still needs a scheduled Worker or queue consumer that:
+
+- Reads encrypted provider tokens/settings from R2.
+- Searches only the provider's receipt/order query.
+- Calls `/v1/connectors/candidate` before reading body text or attachments.
+- Imports only eligible receipt/order records and attachment images/PDFs.
+- Applies Free, Plus, and Business monthly import limits per connected account.
+- Records last sync time, imported count, and disconnect/delete state.
+
 ## Provider Scope Notes
 
 - Gmail: automatic background import likely requires `gmail.readonly`, which is
