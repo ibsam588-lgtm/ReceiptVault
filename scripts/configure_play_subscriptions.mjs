@@ -76,6 +76,7 @@ function assertEnv(name) {
 
 async function getAccessToken() {
   const serviceAccount = JSON.parse(assertEnv("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"));
+  console.log(`Using Google Play service account: ${serviceAccount.client_email}`);
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: "RS256", typ: "JWT" };
   const payload = {
