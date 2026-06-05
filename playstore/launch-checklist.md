@@ -11,6 +11,9 @@
 - Create Google Play subscription products and base plans:
   `receiptvault_plus_monthly`, `receiptvault_plus_yearly`,
   `receiptvault_business_monthly`, `receiptvault_business_yearly`.
+- Run the `Configure Play subscriptions` GitHub Action to create or patch the
+  subscriptions through the Android Publisher API and activate each `standard`
+  base plan.
 - Confirm the Android app can query the live Google Play Billing products on
   the internal testing track.
 - Add the Google Play service account JSON as the Cloudflare Worker secret
