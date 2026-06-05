@@ -66,7 +66,7 @@ jobs:
           packageName: com.corsairlabs.receiptvault
           releaseFiles: app/build/outputs/bundle/release/app-release.aab
           tracks: internal
-          status: draft
+          status: completed
 
       - name: Skip Google Play upload
         if: env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON == ''
