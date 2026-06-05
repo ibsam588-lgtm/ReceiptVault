@@ -57,8 +57,9 @@ Provider configuration verified on 2026-06-05:
   `Mail.Read`. The current client secret expires on 2026-12-02.
 - Yahoo: configured with the Worker callback
   `/v1/connectors/oauth/callback/yahoo`.
-- Other IMAP: listed in provider metadata, but not configured for live OAuth or
-  IMAP import yet.
+- Other IMAP: configured through `POST /v1/connectors/imap/manual`. Users supply
+  email address, IMAP host, port, username, app password, and TLS preference;
+  the Worker encrypts the connection settings before saving them in R2.
 
 Do not commit provider client secrets or token encryption keys. Keep them in
 GitHub repository secrets and Cloudflare Worker secrets only.
@@ -97,6 +98,22 @@ OAuth app redirect URIs:
 provider authorization URL when that provider's client id/secret are configured.
 `GET /v1/connectors/oauth/callback/:provider` exchanges the provider code and
 stores encrypted OAuth token metadata under the authenticated user's R2 prefix.
+
+`POST /v1/connectors/imap/manual` requires a Firebase bearer token and accepts:
+
+```json
+{
+  "emailAddress": "user@example.com",
+  "host": "imap.example.com",
+  "port": 993,
+  "username": "user@example.com",
+  "password": "provider app password",
+  "useTls": true
+}
+```
+
+The endpoint stores encrypted IMAP connection settings and returns only safe
+metadata such as email address, host, port, and TLS preference.
 
 `POST /v1/connectors/candidate` requires a Firebase bearer token and accepts:
 

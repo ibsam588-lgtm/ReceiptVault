@@ -92,6 +92,15 @@ data class ConnectorStoreResult(
     val message: String
 )
 
+data class ImapManualConfig(
+    val emailAddress: String,
+    val host: String,
+    val port: Int,
+    val username: String,
+    val password: String,
+    val useTls: Boolean
+)
+
 class EmailConnectorStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("receiptvault_email_connectors", Context.MODE_PRIVATE)
 
@@ -107,11 +116,22 @@ class EmailConnectorStore(private val context: Context) {
         }
     }
 
-    fun connect(provider: EmailProvider): ConnectorStoreResult {
+    fun canAddAccount(): Boolean {
         val plan = currentPlan()
         val accounts = loadAccounts()
         val activeCount = accounts.count { it.status != ConnectorStatus.Disconnected }
-        if (activeCount >= plan.maxEmailAccounts) {
+        return activeCount < plan.maxEmailAccounts
+    }
+
+    fun connect(
+        provider: EmailProvider,
+        emailAddress: String = "${provider.label} account",
+        status: ConnectorStatus = ConnectorStatus.OAuthPending,
+        lastMessage: String = "Add ${provider.scopeLabel} OAuth credentials to enable live mailbox sync."
+    ): ConnectorStoreResult {
+        val plan = currentPlan()
+        val accounts = loadAccounts()
+        if (!canAddAccount()) {
             return ConnectorStoreResult(
                 accounts,
                 "${plan.label} allows ${plan.maxEmailAccounts} connected email account."
@@ -121,12 +141,12 @@ class EmailConnectorStore(private val context: Context) {
         val account = EmailConnectorAccount(
             id = UUID.randomUUID().toString(),
             provider = provider,
-            emailAddress = "${provider.label} account",
-            status = ConnectorStatus.OAuthPending,
+            emailAddress = emailAddress,
+            status = status,
             monthlyImportCount = 0,
             monthlyImportLimit = plan.monthlyEmailImports,
             lastSyncMillis = null,
-            lastMessage = "Add ${provider.scopeLabel} OAuth credentials to enable live mailbox sync."
+            lastMessage = lastMessage
         )
         val updated = accounts + account
         saveAccounts(updated)

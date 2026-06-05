@@ -65,6 +65,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -87,8 +88,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -296,6 +300,7 @@ private fun ReceiptVaultApp(
                     accounts = emailAccounts,
                     plan = viewModel.activePlan,
                     onConnect = viewModel::connectEmailProvider,
+                    onConnectImap = viewModel::connectManualImap,
                     onSync = viewModel::syncEmailAccount,
                     onDisconnect = viewModel::disconnectEmailAccount,
                     onDeleteData = viewModel::deleteEmailAccountData
@@ -621,10 +626,18 @@ private fun EmailConnectorsScreen(
     accounts: List<EmailConnectorAccount>,
     plan: ReceiptVaultPlan,
     onConnect: (EmailProvider) -> Unit,
+    onConnectImap: (String, String, String, String, String, Boolean) -> Unit,
     onSync: (String) -> Unit,
     onDisconnect: (String) -> Unit,
     onDeleteData: (String) -> Unit
 ) {
+    var imapEmail by rememberSaveable { mutableStateOf("") }
+    var imapHost by rememberSaveable { mutableStateOf("") }
+    var imapPort by rememberSaveable { mutableStateOf("993") }
+    var imapUsername by rememberSaveable { mutableStateOf("") }
+    var imapPassword by rememberSaveable { mutableStateOf("") }
+    var imapUseTls by rememberSaveable { mutableStateOf(true) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
@@ -658,8 +671,28 @@ private fun EmailConnectorsScreen(
             SectionHeader("Connect accounts", "Plan limits", {})
         }
 
-        items(EmailProvider.entries.toList(), key = { it.name }) { provider ->
+        items(EmailProvider.entries.filter { it != EmailProvider.Imap }, key = { it.name }) { provider ->
             ProviderConnectCard(provider, onConnect = { onConnect(provider) })
+        }
+
+        item {
+            ManualImapConnectCard(
+                emailAddress = imapEmail,
+                host = imapHost,
+                port = imapPort,
+                username = imapUsername,
+                password = imapPassword,
+                useTls = imapUseTls,
+                onEmailChange = { imapEmail = it },
+                onHostChange = { imapHost = it },
+                onPortChange = { imapPort = it.filter(Char::isDigit).take(5) },
+                onUsernameChange = { imapUsername = it },
+                onPasswordChange = { imapPassword = it },
+                onUseTlsChange = { imapUseTls = it },
+                onConnect = {
+                    onConnectImap(imapEmail, imapHost, imapPort, imapUsername, imapPassword, imapUseTls)
+                }
+            )
         }
 
         item {
@@ -717,6 +750,103 @@ private fun ProviderConnectCard(provider: EmailProvider, onConnect: () -> Unit) 
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Connect ${provider.label}")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ManualImapConnectCard(
+    emailAddress: String,
+    host: String,
+    port: String,
+    username: String,
+    password: String,
+    useTls: Boolean,
+    onEmailChange: (String) -> Unit,
+    onHostChange: (String) -> Unit,
+    onPortChange: (String) -> Unit,
+    onUsernameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onUseTlsChange: (Boolean) -> Unit,
+    onConnect: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFEAF8F6)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Other IMAP", fontWeight = FontWeight.ExtraBold)
+                    Text("Encrypted server settings", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Text(
+                "Use an app password when your provider supports one.",
+                color = Muted,
+                style = MaterialTheme.typography.bodySmall
+            )
+            OutlinedTextField(
+                value = emailAddress,
+                onValueChange = onEmailChange,
+                label = { Text("Email address") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = host,
+                onValueChange = onHostChange,
+                label = { Text("IMAP host") },
+                placeholder = { Text("imap.example.com") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = port,
+                onValueChange = onPortChange,
+                label = { Text("Port") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            OutlinedTextField(
+                value = username,
+                onValueChange = onUsernameChange,
+                label = { Text("Username") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = password,
+                onValueChange = onPasswordChange,
+                label = { Text("App password") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation()
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Use TLS", fontWeight = FontWeight.Bold)
+                Switch(checked = useTls, onCheckedChange = onUseTlsChange)
+            }
+            Button(
+                onClick = onConnect,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Teal),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Save IMAP settings")
             }
         }
     }
@@ -1319,16 +1449,62 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         val result = connectorStore.connect(provider)
         _emailAccounts.value = result.accounts
         _message.value = result.message
-        if (provider == EmailProvider.Imap) {
-            _message.value = "IMAP requires provider-specific OAuth details before live sync."
-            return
-        }
         viewModelScope.launch {
             val authorizationUrl = connectorClient.startOAuth(provider)
             if (authorizationUrl != null) {
                 _pendingExternalUrl.value = authorizationUrl
             } else {
                 _message.value = "${provider.label} OAuth credentials are not configured yet."
+            }
+        }
+    }
+
+    fun connectManualImap(
+        emailAddress: String,
+        host: String,
+        port: String,
+        username: String,
+        password: String,
+        useTls: Boolean
+    ) {
+        if (!connectorStore.canAddAccount()) {
+            val plan = connectorStore.currentPlan()
+            _message.value = "${plan.label} allows ${plan.maxEmailAccounts} connected email account."
+            return
+        }
+
+        val parsedPort = port.toIntOrNull()
+        if (emailAddress.isBlank() || host.isBlank() || username.isBlank() || password.isBlank() || parsedPort == null) {
+            _message.value = "Enter email, host, port, username, and app password for IMAP."
+            return
+        }
+
+        _isBusy.value = true
+        viewModelScope.launch {
+            try {
+                val config = ImapManualConfig(
+                    emailAddress = emailAddress.trim(),
+                    host = host.trim(),
+                    port = parsedPort,
+                    username = username.trim(),
+                    password = password,
+                    useTls = useTls
+                )
+                val saved = connectorClient.registerManualImap(config)
+                if (saved) {
+                    val result = connectorStore.connect(
+                        provider = EmailProvider.Imap,
+                        emailAddress = config.emailAddress,
+                        status = ConnectorStatus.Ready,
+                        lastMessage = "IMAP settings saved encrypted. Receipt-only imports will use this mailbox configuration."
+                    )
+                    _emailAccounts.value = result.accounts
+                    _message.value = "IMAP connector saved."
+                } else {
+                    _message.value = "Could not save IMAP settings."
+                }
+            } finally {
+                _isBusy.value = false
             }
         }
     }

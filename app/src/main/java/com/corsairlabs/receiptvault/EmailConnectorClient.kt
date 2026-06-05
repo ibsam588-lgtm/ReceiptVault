@@ -30,6 +30,13 @@ class EmailConnectorClient {
         }.getOrDefault(false)
     }
 
+    suspend fun registerManualImap(config: ImapManualConfig): Boolean {
+        return runCatching {
+            val token = firebaseToken()
+            postManualImap(token, config)
+        }.getOrDefault(false)
+    }
+
     private suspend fun firebaseToken(): String {
         val user = auth.currentUser ?: auth.signInAnonymously().await().user
         val token = (user ?: throw IOException("Firebase anonymous auth unavailable"))
@@ -61,6 +68,34 @@ class EmailConnectorClient {
         val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
         if (connection.responseCode !in 200..299) throw IOException(response)
         JSONObject(response).optString("authorizationUrl", "").takeIf { it.isNotBlank() }
+    }
+
+    private suspend fun postManualImap(token: String, config: ImapManualConfig): Boolean = withContext(Dispatchers.IO) {
+        val connection = (URL("$apiBase/v1/connectors/imap/manual").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 10000
+            readTimeout = 15000
+            doOutput = true
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json")
+        }
+
+        val body = JSONObject()
+            .put("emailAddress", config.emailAddress)
+            .put("host", config.host)
+            .put("port", config.port)
+            .put("username", config.username)
+            .put("password", config.password)
+            .put("useTls", config.useTls)
+            .toString()
+        connection.outputStream.use { output ->
+            output.write(body.toByteArray(Charsets.UTF_8))
+        }
+
+        val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+        val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (connection.responseCode !in 200..299) throw IOException(response)
+        true
     }
 
     private suspend fun deleteConnectorToken(token: String, provider: EmailProvider): Boolean = withContext(Dispatchers.IO) {

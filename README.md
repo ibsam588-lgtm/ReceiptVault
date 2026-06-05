@@ -93,12 +93,19 @@ Current connector status, verified on 2026-06-05:
   client secret expires on 2026-12-02 and must be renewed before that date.
 - Yahoo: configured. Uses the Worker Yahoo OAuth callback and receipt/order
   import flow.
-- Other IMAP: not configured yet. This still needs provider-specific OAuth or
-  IMAP credentials before it can be offered as a live connector.
+- Other IMAP: configured for manual per-user setup. Users provide email, IMAP
+  host, port, username, and app password in the Android app; the Worker stores
+  those settings encrypted in R2.
 
 Gemini 2.5 Flash-Lite is configured through the Worker secret. AI Studio
 billing/prepay must be active for live Gemini calls; if Gemini is unavailable,
 the app falls back to local OCR parsing.
+
+Automatic mailbox polling/import jobs are not part of the MVP runtime yet. The
+current connector work stores OAuth/IMAP credentials and applies receipt-only
+candidate checks; the production sync worker still needs to fetch provider
+messages, call `/v1/connectors/candidate`, discard non-receipts, and import only
+eligible receipt/order records.
 
 ## Email Connector Policy
 

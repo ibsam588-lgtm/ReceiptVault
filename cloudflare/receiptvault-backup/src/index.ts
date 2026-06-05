@@ -35,6 +35,15 @@ type OAuthStartRequest = {
   returnUrl?: string;
 };
 
+type ImapManualSetupRequest = {
+  emailAddress?: string;
+  host?: string;
+  port?: number | string;
+  username?: string;
+  password?: string;
+  useTls?: boolean;
+};
+
 type ConnectorProviderId = "gmail" | "outlook" | "yahoo" | "imap";
 
 type OAuthProviderConfig = {
@@ -100,6 +109,15 @@ export default {
       if (!user) return json({ error: "unauthorized" }, 401);
 
       return startConnectorOAuth(request, env, user);
+    }
+
+    if (url.pathname === "/v1/connectors/imap/manual") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+      const user = await authenticate(request, env);
+      if (!user) return json({ error: "unauthorized" }, 401);
+
+      return storeManualImapConnector(request, env, user);
     }
 
     if (url.pathname.startsWith("/v1/connectors/oauth/callback/")) {
@@ -237,15 +255,16 @@ function providerConfig(provider: ConnectorProviderId, env: Env): OAuthProviderC
     label: "Other IMAP",
     authUrl: "",
     tokenUrl: "",
+    clientId: env.CONNECTOR_TOKEN_ENCRYPTION_KEY ? "manual-imap" : undefined,
     scope: "Provider-specific OAuth/IMAP read",
     restrictedScope: false,
     query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
-    reviewRequired: "Provider-specific OAuth or IMAP credentials"
+    reviewRequired: "Per-user IMAP host, port, username, and app password"
   };
 }
 
 function isProviderConfigured(provider: OAuthProviderConfig): boolean {
-  if (provider.id === "imap") return false;
+  if (provider.id === "imap") return Boolean(provider.clientId);
   return Boolean(provider.clientId && provider.clientSecret);
 }
 
@@ -259,11 +278,19 @@ async function startConnectorOAuth(request: Request, env: Env, user: JWTPayload)
   const origin = new URL(request.url).origin;
   const redirectUri = `${origin}/v1/connectors/oauth/callback/${provider.id}`;
 
+  if (provider.id === "imap") {
+    return json({
+      error: "imap_manual_setup_required",
+      provider: providerPublic(provider, origin),
+      manualSetupEndpoint: `${origin}/v1/connectors/imap/manual`
+    }, 400);
+  }
+
   if (!isProviderConfigured(provider)) {
     return json({
       error: "provider_not_configured",
       provider: providerPublic(provider, origin),
-      missingSecrets: provider.id === "imap" ? ["provider-specific"] : missingProviderSecrets(provider.id, env)
+      missingSecrets: missingProviderSecrets(provider.id, env)
     }, 503);
   }
 
@@ -316,6 +343,82 @@ async function readOAuthStartBody(request: Request): Promise<OAuthStartRequest> 
   } catch {
     return {};
   }
+}
+
+async function storeManualImapConnector(request: Request, env: Env, user: JWTPayload): Promise<Response> {
+  if (!env.CONNECTOR_TOKEN_ENCRYPTION_KEY) return json({ error: "connector_encryption_not_configured" }, 503);
+
+  const body = await readImapManualSetupBody(request);
+  const emailAddress = normalizeEmail(body.emailAddress);
+  const host = normalizeImapHost(body.host);
+  const port = normalizePort(body.port);
+  const username = typeof body.username === "string" ? body.username.trim() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  const useTls = body.useTls !== false;
+
+  if (!emailAddress) return json({ error: "valid_email_required" }, 400);
+  if (!host) return json({ error: "valid_imap_host_required" }, 400);
+  if (!port) return json({ error: "valid_imap_port_required" }, 400);
+  if (!username) return json({ error: "imap_username_required" }, 400);
+  if (!password) return json({ error: "imap_password_required" }, 400);
+
+  const provider = providerConfig("imap", env);
+  const encrypted = await encryptJson({
+    host,
+    port,
+    username,
+    password,
+    useTls
+  }, env.CONNECTOR_TOKEN_ENCRYPTION_KEY);
+
+  await env.RECEIPTS_BUCKET.put(connectorTokenObjectName(String(user.sub || ""), "imap"), JSON.stringify({
+    provider: "imap",
+    label: provider.label,
+    scope: provider.scope,
+    storedAt: new Date().toISOString(),
+    emailAddress,
+    host,
+    port,
+    useTls,
+    encrypted
+  }), {
+    httpMetadata: { contentType: "application/json" }
+  });
+
+  return json({
+    ok: true,
+    provider: "imap",
+    label: provider.label,
+    emailAddress,
+    host,
+    port,
+    useTls
+  });
+}
+
+async function readImapManualSetupBody(request: Request): Promise<ImapManualSetupRequest> {
+  try {
+    return (await request.json()) as ImapManualSetupRequest;
+  } catch {
+    return {};
+  }
+}
+
+function normalizeEmail(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const email = value.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+function normalizeImapHost(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const host = value.trim().toLowerCase();
+  return /^(?!-)[a-z0-9.-]{2,253}(?<!-)$/.test(host) && host.includes(".") ? host : null;
+}
+
+function normalizePort(value: unknown): number | null {
+  const port = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : Number.NaN;
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
 }
 
 function normalizeProvider(provider: unknown): ConnectorProviderId | null {
@@ -426,6 +529,9 @@ async function listConnectorAccounts(env: Env, user: JWTPayload): Promise<Respon
         label: metadata.label || provider,
         scope: metadata.scope || "",
         storedAt: metadata.storedAt || null,
+        emailAddress: metadata.emailAddress || null,
+        host: metadata.host || null,
+        port: metadata.port || null,
         connected: true
       });
     }

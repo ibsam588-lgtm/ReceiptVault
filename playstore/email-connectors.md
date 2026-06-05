@@ -48,13 +48,15 @@ Recommended flow:
   candidates.
 - Yahoo and generic IMAP: use OAuth where the provider supports it. If IMAP
   technically exposes the mailbox, ReceiptVault must still apply the
-  receipt-only search, discard, disclosure, and deletion rules above.
+  receipt-only search, discard, disclosure, and deletion rules above. Manual
+  IMAP setup should prefer provider app passwords over account passwords.
 
 ## OAuth App Redirect URIs
 
 - Gmail: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/gmail`
 - Outlook: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/outlook`
 - Yahoo: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/yahoo`
+- Other IMAP: manual setup posts to `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/imap/manual`
 
 Repository and Worker secrets:
 
