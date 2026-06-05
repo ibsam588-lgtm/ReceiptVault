@@ -14,6 +14,11 @@
 - Run the `Configure Play subscriptions` GitHub Action to create or patch the
   subscriptions through the Android Publisher API and activate each `standard`
   base plan.
+- As of 2026-06-05, the subscription action reaches
+  `play-deploy@sacred-evening-412414.iam.gserviceaccount.com` but the Android
+  Publisher subscription PATCH still returns `PERMISSION_DENIED`; the Play
+  Console base-plan save for `receiptvault_plus_monthly` also fails with
+  Google's generic "Your changes couldn't be saved" message.
 - If the action logs a US-only pricing fallback, expand regional availability
   in Play Console or resolve `pricing:convertRegionPrices` access before
   production rollout.
@@ -27,10 +32,11 @@
   Safety are present in the release.
 - If launching Gmail sync, complete OAuth verification for the restricted Gmail
   scope and any required security assessment before production access.
-- Set up Gemini AI Studio billing/prepay for
-  `https://aistudio.google.com/billing?project=gen-lang-client-0123839677&billing=012A8C-6B3188-636287`.
-- Confirm the Gemini server secret is still present in the Worker environment:
-  `GEMINI_API_KEY`.
+- Gemini billing alignment: funded prepay project is
+  `gen-lang-client-0451935558`; current `GEMINI_API_KEY` belongs to
+  `gen-lang-client-0123839677`, which still requires prepay and returns upstream
+  Gemini `429`. Create a key in the funded project or fund the old key project,
+  then update `GEMINI_API_KEY` and rerun the Cloudflare Worker workflow.
 - Renew the Microsoft Entra Outlook connector secret before 2026-12-02, or
   replace it with a certificate/federated credential. Microsoft client secrets
   cannot be set to never expire.
@@ -38,4 +44,7 @@
   `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
 - Add Cloudflare deployment secrets: `CLOUDFLARE_API_TOKEN` and
   `CLOUDFLARE_ACCOUNT_ID`.
-- Run internal testing track before production.
+- Internal testing is active after the GitHub Android workflow upload. The app
+  remains Draft/Not reviewed in Play Console.
+- Production access on this Play account requires a closed test with at least
+  12 opted-in testers for at least 14 days before applying for production.
