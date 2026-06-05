@@ -16,6 +16,13 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CONNECTOR_TOKEN_ENCRYPTION_KEY: ${{ secrets.CONNECTOR_TOKEN_ENCRYPTION_KEY }}
+      GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+      MICROSOFT_OAUTH_CLIENT_ID: ${{ secrets.MICROSOFT_OAUTH_CLIENT_ID }}
+      MICROSOFT_OAUTH_CLIENT_SECRET: ${{ secrets.MICROSOFT_OAUTH_CLIENT_SECRET }}
+      YAHOO_OAUTH_CLIENT_ID: ${{ secrets.YAHOO_OAUTH_CLIENT_ID }}
+      YAHOO_OAUTH_CLIENT_SECRET: ${{ secrets.YAHOO_OAUTH_CLIENT_SECRET }}
     defaults:
       run:
         working-directory: cloudflare/receiptvault-backup
@@ -39,6 +46,34 @@ jobs:
       - name: Configure Gemini secret
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.GEMINI_API_KEY != ''
         run: echo "$GEMINI_API_KEY" | npx wrangler secret put GEMINI_API_KEY
+
+      - name: Configure connector encryption secret
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.CONNECTOR_TOKEN_ENCRYPTION_KEY != ''
+        run: echo "$CONNECTOR_TOKEN_ENCRYPTION_KEY" | npx wrangler secret put CONNECTOR_TOKEN_ENCRYPTION_KEY
+
+      - name: Configure Google OAuth client id
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.GOOGLE_OAUTH_CLIENT_ID != ''
+        run: echo "$GOOGLE_OAUTH_CLIENT_ID" | npx wrangler secret put GOOGLE_OAUTH_CLIENT_ID
+
+      - name: Configure Google OAuth client secret
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.GOOGLE_OAUTH_CLIENT_SECRET != ''
+        run: echo "$GOOGLE_OAUTH_CLIENT_SECRET" | npx wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET
+
+      - name: Configure Microsoft OAuth client id
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.MICROSOFT_OAUTH_CLIENT_ID != ''
+        run: echo "$MICROSOFT_OAUTH_CLIENT_ID" | npx wrangler secret put MICROSOFT_OAUTH_CLIENT_ID
+
+      - name: Configure Microsoft OAuth client secret
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.MICROSOFT_OAUTH_CLIENT_SECRET != ''
+        run: echo "$MICROSOFT_OAUTH_CLIENT_SECRET" | npx wrangler secret put MICROSOFT_OAUTH_CLIENT_SECRET
+
+      - name: Configure Yahoo OAuth client id
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.YAHOO_OAUTH_CLIENT_ID != ''
+        run: echo "$YAHOO_OAUTH_CLIENT_ID" | npx wrangler secret put YAHOO_OAUTH_CLIENT_ID
+
+      - name: Configure Yahoo OAuth client secret
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' && env.YAHOO_OAUTH_CLIENT_SECRET != ''
+        run: echo "$YAHOO_OAUTH_CLIENT_SECRET" | npx wrangler secret put YAHOO_OAUTH_CLIENT_SECRET
 
       - name: Deploy Worker
         if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''

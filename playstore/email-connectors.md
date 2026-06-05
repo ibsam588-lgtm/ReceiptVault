@@ -50,6 +50,26 @@ Recommended flow:
   technically exposes the mailbox, ReceiptVault must still apply the
   receipt-only search, discard, disclosure, and deletion rules above.
 
+## OAuth App Redirect URIs
+
+- Gmail: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/gmail`
+- Outlook: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/outlook`
+- Yahoo: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/yahoo`
+
+Repository and Worker secrets:
+
+- `CONNECTOR_TOKEN_ENCRYPTION_KEY`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `MICROSOFT_OAUTH_CLIENT_ID`
+- `MICROSOFT_OAUTH_CLIENT_SECRET`
+- `YAHOO_OAUTH_CLIENT_ID`
+- `YAHOO_OAUTH_CLIENT_SECRET`
+
+These provider apps can be created before production, but Gmail restricted-scope
+verification and any required security assessment must be completed by the
+business owner before public connector launch.
+
 ## Play And OAuth Compliance
 
 - Add a prominent in-app disclosure before account connection.

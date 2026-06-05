@@ -93,6 +93,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -217,6 +218,16 @@ private fun ReceiptVaultApp(
     val emailAccounts by viewModel.emailAccounts.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
     val message by viewModel.message.collectAsState()
+    val pendingExternalUrl by viewModel.pendingExternalUrl.collectAsState()
+    val context = LocalContext.current
+
+    LaunchedEffect(pendingExternalUrl) {
+        val url = pendingExternalUrl
+        if (!url.isNullOrBlank()) {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            viewModel.clearPendingExternalUrl()
+        }
+    }
 
     Scaffold(
         containerColor = Soft,
@@ -1237,6 +1248,7 @@ private fun ReceiptVaultTheme(content: @Composable () -> Unit) {
 class ReceiptVaultViewModel(application: Application) : AndroidViewModel(application) {
     private val store = ReceiptStore(application)
     private val connectorStore = EmailConnectorStore(application)
+    private val connectorClient = EmailConnectorClient()
     private val ocrScanner = OcrScanner(application)
     private val aiClient = ReceiptAiClient(application)
     private val parser = ReceiptParser()
@@ -1254,6 +1266,9 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
 
     private val _message = MutableStateFlow("")
     val message: StateFlow<String> = _message
+
+    private val _pendingExternalUrl = MutableStateFlow<String?>(null)
+    val pendingExternalUrl: StateFlow<String?> = _pendingExternalUrl
 
     private var selectedReceiptId by mutableStateOf<String?>(_receipts.value.firstOrNull()?.id)
     val selectedReceipt: Receipt?
@@ -1304,6 +1319,18 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         val result = connectorStore.connect(provider)
         _emailAccounts.value = result.accounts
         _message.value = result.message
+        if (provider == EmailProvider.Imap) {
+            _message.value = "IMAP requires provider-specific OAuth details before live sync."
+            return
+        }
+        viewModelScope.launch {
+            val authorizationUrl = connectorClient.startOAuth(provider)
+            if (authorizationUrl != null) {
+                _pendingExternalUrl.value = authorizationUrl
+            } else {
+                _message.value = "${provider.label} OAuth credentials are not configured yet."
+            }
+        }
     }
 
     fun syncEmailAccount(id: String) {
@@ -1313,19 +1340,35 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun disconnectEmailAccount(id: String) {
+        val provider = _emailAccounts.value.firstOrNull { it.id == id }?.provider
         val result = connectorStore.disconnect(id)
         _emailAccounts.value = result.accounts
         _message.value = result.message
+        if (provider != null) {
+            viewModelScope.launch {
+                connectorClient.deleteAccount(provider)
+            }
+        }
     }
 
     fun deleteEmailAccountData(id: String) {
+        val provider = _emailAccounts.value.firstOrNull { it.id == id }?.provider
         val result = connectorStore.deleteAccountData(id)
         _emailAccounts.value = result.accounts
         _message.value = result.message
+        if (provider != null) {
+            viewModelScope.launch {
+                connectorClient.deleteAccount(provider)
+            }
+        }
     }
 
     fun clearMessage() {
         _message.value = ""
+    }
+
+    fun clearPendingExternalUrl() {
+        _pendingExternalUrl.value = null
     }
 
     companion object {

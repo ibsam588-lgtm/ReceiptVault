@@ -70,6 +70,9 @@ Core promise:
 - Automatic merchant, date, amount, category, return date, and warranty suggestions.
 - Email connector screen for Gmail, Outlook, Yahoo, and IMAP account tracking,
   sync status, disconnect, delete-data controls, and plan limit enforcement.
+- OAuth launch flow for Gmail, Outlook, and Yahoo through the Cloudflare Worker,
+  with encrypted server-side connector token storage once provider credentials
+  are configured.
 - Local receipt vault, search, warranty screen, detail view, and Plus plan screen.
 
 ## Email Connector Policy

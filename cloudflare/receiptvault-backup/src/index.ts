@@ -6,6 +6,13 @@ type Env = {
   REQUIRE_PLUS_CLAIM: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
+  CONNECTOR_TOKEN_ENCRYPTION_KEY?: string;
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+  MICROSOFT_OAUTH_CLIENT_ID?: string;
+  MICROSOFT_OAUTH_CLIENT_SECRET?: string;
+  YAHOO_OAUTH_CLIENT_ID?: string;
+  YAHOO_OAUTH_CLIENT_SECRET?: string;
 };
 
 type CategorizeRequest = {
@@ -21,6 +28,34 @@ type ConnectorCandidateRequest = {
   from?: string;
   snippet?: string;
   hasAttachments?: boolean;
+};
+
+type OAuthStartRequest = {
+  provider?: string;
+  returnUrl?: string;
+};
+
+type ConnectorProviderId = "gmail" | "outlook" | "yahoo" | "imap";
+
+type OAuthProviderConfig = {
+  id: ConnectorProviderId;
+  label: string;
+  authUrl: string;
+  tokenUrl: string;
+  clientId?: string;
+  clientSecret?: string;
+  scope: string;
+  query: string;
+  restrictedScope: boolean;
+  reviewRequired: string;
+};
+
+type OAuthState = {
+  provider: ConnectorProviderId;
+  userId: string;
+  returnUrl?: string;
+  iat: number;
+  nonce: string;
 };
 
 const firebaseKeys = createRemoteJWKSet(
@@ -46,7 +81,7 @@ export default {
 
     if (url.pathname === "/v1/connectors/providers") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
-      return json({ ok: true, providers: connectorProviders() });
+      return json({ ok: true, providers: connectorProviders(request, env) });
     }
 
     if (url.pathname === "/v1/connectors/candidate") {
@@ -56,6 +91,34 @@ export default {
       if (!user) return json({ error: "unauthorized" }, 401);
 
       return connectorCandidate(request);
+    }
+
+    if (url.pathname === "/v1/connectors/oauth/start") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+      const user = await authenticate(request, env);
+      if (!user) return json({ error: "unauthorized" }, 401);
+
+      return startConnectorOAuth(request, env, user);
+    }
+
+    if (url.pathname.startsWith("/v1/connectors/oauth/callback/")) {
+      if (request.method !== "GET") return html("Method not allowed", 405);
+      return finishConnectorOAuth(request, env);
+    }
+
+    if (url.pathname === "/v1/connectors/accounts") {
+      const user = await authenticate(request, env);
+      if (!user) return json({ error: "unauthorized" }, 401);
+      if (request.method === "GET") return listConnectorAccounts(env, user);
+      return json({ error: "method_not_allowed" }, 405);
+    }
+
+    if (url.pathname.startsWith("/v1/connectors/accounts/")) {
+      const user = await authenticate(request, env);
+      if (!user) return json({ error: "unauthorized" }, 401);
+      if (request.method === "DELETE") return deleteConnectorAccount(request, env, user);
+      return json({ error: "method_not_allowed" }, 405);
     }
 
     if (!url.pathname.startsWith("/v1/receipts/")) {
@@ -96,41 +159,356 @@ export default {
   }
 };
 
-function connectorProviders(): Array<Record<string, unknown>> {
+function connectorProviders(request: Request, env: Env): Array<Record<string, unknown>> {
+  const origin = new URL(request.url).origin;
+  return connectorProviderConfigs(env).map((provider) => providerPublic(provider, origin));
+}
+
+function providerPublic(provider: OAuthProviderConfig, origin: string): Record<string, unknown> {
+  return {
+    id: provider.id,
+    label: provider.label,
+    scope: provider.scope,
+    restrictedScope: provider.restrictedScope,
+    query: provider.query,
+    reviewRequired: provider.reviewRequired,
+    configured: isProviderConfigured(provider),
+    redirectUri: `${origin}/v1/connectors/oauth/callback/${provider.id}`
+  };
+}
+
+function connectorProviderConfigs(env: Env): OAuthProviderConfig[] {
   return [
-    {
+    providerConfig("gmail", env),
+    providerConfig("outlook", env),
+    providerConfig("yahoo", env),
+    providerConfig("imap", env)
+  ];
+}
+
+function providerConfig(provider: ConnectorProviderId, env: Env): OAuthProviderConfig {
+  if (provider === "gmail") {
+    return {
       id: "gmail",
       label: "Gmail",
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: env.GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
       scope: "https://www.googleapis.com/auth/gmail.readonly",
       restrictedScope: true,
       query: 'newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty)',
       reviewRequired: "Google OAuth restricted-scope verification and possible security assessment"
-    },
-    {
+    };
+  }
+
+  if (provider === "outlook") {
+    return {
       id: "outlook",
       label: "Outlook",
-      scope: "Mail.Read delegated",
+      authUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      tokenUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      clientId: env.MICROSOFT_OAUTH_CLIENT_ID,
+      clientSecret: env.MICROSOFT_OAUTH_CLIENT_SECRET,
+      scope: "offline_access User.Read Mail.Read",
       restrictedScope: false,
       query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
       reviewRequired: "Microsoft Entra app registration and user consent"
-    },
-    {
+    };
+  }
+
+  if (provider === "yahoo") {
+    return {
       id: "yahoo",
       label: "Yahoo",
-      scope: "Yahoo OAuth + IMAP read",
+      authUrl: "https://api.login.yahoo.com/oauth2/request_auth",
+      tokenUrl: "https://api.login.yahoo.com/oauth2/get_token",
+      clientId: env.YAHOO_OAUTH_CLIENT_ID,
+      clientSecret: env.YAHOO_OAUTH_CLIENT_SECRET,
+      scope: "mail-r",
       restrictedScope: false,
       query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
       reviewRequired: "Yahoo developer app registration"
-    },
-    {
-      id: "imap",
-      label: "Other IMAP",
-      scope: "OAuth/IMAP read",
-      restrictedScope: false,
-      query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
-      reviewRequired: "Provider-specific OAuth or IMAP credentials"
+    };
+  }
+
+  return {
+    id: "imap",
+    label: "Other IMAP",
+    authUrl: "",
+    tokenUrl: "",
+    scope: "Provider-specific OAuth/IMAP read",
+    restrictedScope: false,
+    query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
+    reviewRequired: "Provider-specific OAuth or IMAP credentials"
+  };
+}
+
+function isProviderConfigured(provider: OAuthProviderConfig): boolean {
+  if (provider.id === "imap") return false;
+  return Boolean(provider.clientId && provider.clientSecret);
+}
+
+async function startConnectorOAuth(request: Request, env: Env, user: JWTPayload): Promise<Response> {
+  if (!env.CONNECTOR_TOKEN_ENCRYPTION_KEY) return json({ error: "connector_encryption_not_configured" }, 503);
+  const body = await readOAuthStartBody(request);
+  const providerId = normalizeProvider(body.provider);
+  if (!providerId) return json({ error: "unsupported_provider" }, 400);
+
+  const provider = providerConfig(providerId, env);
+  const origin = new URL(request.url).origin;
+  const redirectUri = `${origin}/v1/connectors/oauth/callback/${provider.id}`;
+
+  if (!isProviderConfigured(provider)) {
+    return json({
+      error: "provider_not_configured",
+      provider: providerPublic(provider, origin),
+      missingSecrets: provider.id === "imap" ? ["provider-specific"] : missingProviderSecrets(provider.id, env)
+    }, 503);
+  }
+
+  const state = await signOAuthState({
+    provider: provider.id,
+    userId: String(user.sub || ""),
+    returnUrl: body.returnUrl,
+    iat: Date.now(),
+    nonce: crypto.randomUUID()
+  }, env.CONNECTOR_TOKEN_ENCRYPTION_KEY);
+
+  const authorizationUrl = buildAuthorizationUrl(provider, redirectUri, state);
+  return json({ ok: true, provider: providerPublic(provider, origin), authorizationUrl });
+}
+
+async function finishConnectorOAuth(request: Request, env: Env): Promise<Response> {
+  if (!env.CONNECTOR_TOKEN_ENCRYPTION_KEY) return html("Connector encryption is not configured.", 503);
+
+  const url = new URL(request.url);
+  const pathProvider = normalizeProvider(url.pathname.split("/").pop());
+  const code = url.searchParams.get("code");
+  const stateParam = url.searchParams.get("state");
+  const error = url.searchParams.get("error");
+
+  if (error) return html(`ReceiptVault connector authorization failed: ${escapeHtml(error)}`, 400);
+  if (!pathProvider || !code || !stateParam) return html("Missing OAuth callback data.", 400);
+
+  const state = await verifyOAuthState(stateParam, env.CONNECTOR_TOKEN_ENCRYPTION_KEY);
+  if (!state || state.provider !== pathProvider || Date.now() - state.iat > 10 * 60 * 1000) {
+    return html("OAuth state is invalid or expired.", 400);
+  }
+
+  const provider = providerConfig(pathProvider, env);
+  if (!isProviderConfigured(provider)) return html(`${provider.label} is not configured.`, 503);
+
+  const redirectUri = `${url.origin}/v1/connectors/oauth/callback/${provider.id}`;
+  const tokenResponse = await exchangeOAuthCode(provider, code, redirectUri);
+  if (!tokenResponse.ok) {
+    return html(`Could not connect ${provider.label}: ${escapeHtml(tokenResponse.error)}`, 502);
+  }
+
+  await storeConnectorToken(env, state.userId, provider, tokenResponse.tokens);
+  const returnLink = state.returnUrl ? `<p><a href="${escapeHtml(state.returnUrl)}">Return to ReceiptVault</a></p>` : "";
+  return html(`<h1>${provider.label} connected</h1><p>ReceiptVault can now run receipt-only imports for this account.</p>${returnLink}`);
+}
+
+async function readOAuthStartBody(request: Request): Promise<OAuthStartRequest> {
+  try {
+    return (await request.json()) as OAuthStartRequest;
+  } catch {
+    return {};
+  }
+}
+
+function normalizeProvider(provider: unknown): ConnectorProviderId | null {
+  if (typeof provider !== "string") return null;
+  const normalized = provider.toLowerCase();
+  if (normalized === "gmail" || normalized === "google") return "gmail";
+  if (normalized === "outlook" || normalized === "microsoft") return "outlook";
+  if (normalized === "yahoo") return "yahoo";
+  if (normalized === "imap") return "imap";
+  return null;
+}
+
+function missingProviderSecrets(provider: ConnectorProviderId, env: Env): string[] {
+  const missing: string[] = [];
+  if (provider === "gmail") {
+    if (!env.GOOGLE_OAUTH_CLIENT_ID) missing.push("GOOGLE_OAUTH_CLIENT_ID");
+    if (!env.GOOGLE_OAUTH_CLIENT_SECRET) missing.push("GOOGLE_OAUTH_CLIENT_SECRET");
+  }
+  if (provider === "outlook") {
+    if (!env.MICROSOFT_OAUTH_CLIENT_ID) missing.push("MICROSOFT_OAUTH_CLIENT_ID");
+    if (!env.MICROSOFT_OAUTH_CLIENT_SECRET) missing.push("MICROSOFT_OAUTH_CLIENT_SECRET");
+  }
+  if (provider === "yahoo") {
+    if (!env.YAHOO_OAUTH_CLIENT_ID) missing.push("YAHOO_OAUTH_CLIENT_ID");
+    if (!env.YAHOO_OAUTH_CLIENT_SECRET) missing.push("YAHOO_OAUTH_CLIENT_SECRET");
+  }
+  return missing;
+}
+
+function buildAuthorizationUrl(provider: OAuthProviderConfig, redirectUri: string, state: string): string {
+  const url = new URL(provider.authUrl);
+  url.searchParams.set("client_id", provider.clientId || "");
+  url.searchParams.set("redirect_uri", redirectUri);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("scope", provider.scope);
+  url.searchParams.set("state", state);
+
+  if (provider.id === "gmail") {
+    url.searchParams.set("access_type", "offline");
+    url.searchParams.set("prompt", "consent");
+  }
+
+  if (provider.id === "outlook") {
+    url.searchParams.set("prompt", "select_account");
+  }
+
+  return url.toString();
+}
+
+async function exchangeOAuthCode(
+  provider: OAuthProviderConfig,
+  code: string,
+  redirectUri: string
+): Promise<{ ok: true; tokens: Record<string, unknown> } | { ok: false; error: string }> {
+  const body = new URLSearchParams();
+  body.set("grant_type", "authorization_code");
+  body.set("code", code);
+  body.set("redirect_uri", redirectUri);
+
+  const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };
+
+  if (provider.id === "yahoo") {
+    headers.authorization = `Basic ${btoa(`${provider.clientId}:${provider.clientSecret}`)}`;
+  } else {
+    body.set("client_id", provider.clientId || "");
+    body.set("client_secret", provider.clientSecret || "");
+  }
+
+  const response = await fetch(provider.tokenUrl, { method: "POST", headers, body });
+  const tokens = await response.json<Record<string, unknown>>().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, error: JSON.stringify(tokens) };
+  }
+  return { ok: true, tokens };
+}
+
+async function storeConnectorToken(
+  env: Env,
+  userId: string,
+  provider: OAuthProviderConfig,
+  tokens: Record<string, unknown>
+): Promise<void> {
+  if (!env.CONNECTOR_TOKEN_ENCRYPTION_KEY) throw new Error("missing encryption key");
+  const encrypted = await encryptJson(tokens, env.CONNECTOR_TOKEN_ENCRYPTION_KEY);
+  const key = connectorTokenObjectName(userId, provider.id);
+  await env.RECEIPTS_BUCKET.put(key, JSON.stringify({
+    provider: provider.id,
+    label: provider.label,
+    scope: provider.scope,
+    storedAt: new Date().toISOString(),
+    encrypted
+  }), {
+    httpMetadata: { contentType: "application/json" }
+  });
+}
+
+async function listConnectorAccounts(env: Env, user: JWTPayload): Promise<Response> {
+  const userId = String(user.sub || "");
+  const providers: ConnectorProviderId[] = ["gmail", "outlook", "yahoo", "imap"];
+  const accounts: Array<Record<string, unknown>> = [];
+
+  for (const provider of providers) {
+    const object = await env.RECEIPTS_BUCKET.get(connectorTokenObjectName(userId, provider));
+    if (object) {
+      const metadata = await object.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+      accounts.push({
+        provider,
+        label: metadata.label || provider,
+        scope: metadata.scope || "",
+        storedAt: metadata.storedAt || null,
+        connected: true
+      });
     }
-  ];
+  }
+
+  return json({ ok: true, accounts });
+}
+
+async function deleteConnectorAccount(request: Request, env: Env, user: JWTPayload): Promise<Response> {
+  const provider = normalizeProvider(new URL(request.url).pathname.split("/").pop());
+  if (!provider) return json({ error: "unsupported_provider" }, 400);
+  await env.RECEIPTS_BUCKET.delete(connectorTokenObjectName(String(user.sub || ""), provider));
+  return json({ ok: true, provider });
+}
+
+function connectorTokenObjectName(userId: string, provider: ConnectorProviderId): string {
+  return `users/${userId}/connectors/${provider}/oauth-token.json`;
+}
+
+async function signOAuthState(state: OAuthState, secret: string): Promise<string> {
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(state)));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return `${payload}.${base64UrlEncode(new Uint8Array(signature))}`;
+}
+
+async function verifyOAuthState(stateParam: string, secret: string): Promise<OAuthState | null> {
+  const [payload, signature] = stateParam.split(".");
+  if (!payload || !signature) return null;
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  const ok = await crypto.subtle.verify(
+    "HMAC",
+    key,
+    base64UrlDecode(signature),
+    new TextEncoder().encode(payload)
+  );
+  if (!ok) return null;
+
+  return JSON.parse(new TextDecoder().decode(base64UrlDecode(payload))) as OAuthState;
+}
+
+async function encryptJson(value: unknown, secret: string): Promise<Record<string, string>> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await aesKey(secret);
+  const plaintext = new TextEncoder().encode(JSON.stringify(value));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext);
+  return {
+    alg: "AES-GCM",
+    iv: base64UrlEncode(iv),
+    ciphertext: base64UrlEncode(new Uint8Array(ciphertext))
+  };
+}
+
+async function aesKey(secret: string): Promise<CryptoKey> {
+  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return crypto.subtle.importKey("raw", hash, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let raw = "";
+  bytes.forEach((byte) => {
+    raw += String.fromCharCode(byte);
+  });
+  return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const raw = atob(padded);
+  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
 }
 
 async function connectorCandidate(request: Request): Promise<Response> {
@@ -301,6 +679,21 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json" }
   });
+}
+
+function html(body: string, status = 200): Response {
+  return new Response(`<!doctype html><html><body>${body}</body></html>`, {
+    status,
+    headers: { "content-type": "text/html; charset=utf-8" }
+  });
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
