@@ -109,6 +109,7 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.roundToLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -213,6 +214,7 @@ private fun ReceiptVaultApp(
     onPickImage: () -> Unit
 ) {
     val receipts by viewModel.receipts.collectAsState()
+    val emailAccounts by viewModel.emailAccounts.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
     val message by viewModel.message.collectAsState()
 
@@ -238,6 +240,7 @@ private fun ReceiptVaultApp(
                     NavItem(AppScreen.Home, currentScreen, onScreenChange)
                     NavItem(AppScreen.Search, currentScreen, onScreenChange)
                     NavItem(AppScreen.Scan, currentScreen, onScreenChange)
+                    NavItem(AppScreen.Email, currentScreen, onScreenChange)
                     NavItem(AppScreen.Warranties, currentScreen, onScreenChange)
                     NavItem(AppScreen.Plus, currentScreen, onScreenChange)
                 }
@@ -259,12 +262,14 @@ private fun ReceiptVaultApp(
                         onScreenChange(AppScreen.Detail)
                     },
                     onSearch = { onScreenChange(AppScreen.Search) },
+                    onEmail = { onScreenChange(AppScreen.Email) },
                     onWarranties = { onScreenChange(AppScreen.Warranties) }
                 )
 
                 AppScreen.Scan -> ImportScreen(
                     onScan = onScan,
-                    onPickImage = onPickImage
+                    onPickImage = onPickImage,
+                    onEmailAccounts = { onScreenChange(AppScreen.Email) }
                 )
 
                 AppScreen.Search -> SearchScreen(
@@ -276,6 +281,14 @@ private fun ReceiptVaultApp(
                 )
 
                 AppScreen.Warranties -> WarrantyScreen(receipts)
+                AppScreen.Email -> EmailConnectorsScreen(
+                    accounts = emailAccounts,
+                    plan = viewModel.activePlan,
+                    onConnect = viewModel::connectEmailProvider,
+                    onSync = viewModel::syncEmailAccount,
+                    onDisconnect = viewModel::disconnectEmailAccount,
+                    onDeleteData = viewModel::deleteEmailAccountData
+                )
                 AppScreen.Plus -> PlusScreen()
                 AppScreen.Detail -> ReceiptDetailScreen(
                     receipt = viewModel.selectedReceipt ?: receipts.firstOrNull(),
@@ -339,6 +352,7 @@ private fun HomeScreen(
     onPickImage: () -> Unit,
     onSelect: (Receipt) -> Unit,
     onSearch: () -> Unit,
+    onEmail: () -> Unit,
     onWarranties: () -> Unit
 ) {
     val total = receipts.sumOf { it.amountCents }
@@ -362,9 +376,9 @@ private fun HomeScreen(
                 QuickAction(
                     modifier = Modifier.weight(1f),
                     title = "Email import",
-                    detail = "Share to app",
+                    detail = "Auto or share",
                     icon = { Icon(Icons.Default.Email, contentDescription = null) },
-                    onClick = onSearch
+                    onClick = onEmail
                 )
             }
         }
@@ -448,7 +462,7 @@ private fun VaultHero(total: Long, count: Int, onScan: () -> Unit) {
 }
 
 @Composable
-private fun ImportScreen(onScan: () -> Unit, onPickImage: () -> Unit) {
+private fun ImportScreen(onScan: () -> Unit, onPickImage: () -> Unit, onEmailAccounts: () -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
@@ -481,10 +495,10 @@ private fun ImportScreen(onScan: () -> Unit, onPickImage: () -> Unit) {
         item {
             ImportCard(
                 title = "Import from email",
-                detail = "Open the receipt image in your email app, tap Share, then choose ReceiptVault.",
+                detail = "Share an attachment now, or connect email accounts for receipt-only automatic imports.",
                 icon = { Icon(Icons.Default.Email, contentDescription = null) },
-                button = "Ready",
-                onClick = {}
+                button = "Email accounts",
+                onClick = onEmailAccounts
             )
         }
     }
@@ -588,6 +602,170 @@ private fun WarrantyScreen(receipts: List<Receipt>) {
                 WarrantyRow(receipt)
             }
         }
+    }
+}
+
+@Composable
+private fun EmailConnectorsScreen(
+    accounts: List<EmailConnectorAccount>,
+    plan: ReceiptVaultPlan,
+    onConnect: (EmailProvider) -> Unit,
+    onSync: (String) -> Unit,
+    onDisconnect: (String) -> Unit,
+    onDeleteData: (String) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF244653)),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Email receipt import", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                    Text(
+                        "${plan.label}: ${accounts.count { it.status != ConnectorStatus.Disconnected }}/${plan.maxEmailAccounts} accounts, ${plan.monthlyEmailImports} imports monthly",
+                        color = Color.White.copy(alpha = 0.78f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Only receipt, order, invoice, return, and warranty messages are eligible for import.",
+                        color = Color.White.copy(alpha = 0.78f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
+        item {
+            SectionHeader("Connect accounts", "Plan limits", {})
+        }
+
+        items(EmailProvider.entries.toList(), key = { it.name }) { provider ->
+            ProviderConnectCard(provider, onConnect = { onConnect(provider) })
+        }
+
+        item {
+            SectionHeader("Connected accounts", "Delete data", {})
+        }
+
+        if (accounts.isEmpty()) {
+            item {
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+                    Text(
+                        "No email accounts connected yet. Add Gmail, Outlook, Yahoo, or IMAP to prepare automatic receipt imports.",
+                        modifier = Modifier.padding(18.dp),
+                        color = Muted
+                    )
+                }
+            }
+        } else {
+            items(accounts, key = { it.id }) { account ->
+                EmailAccountCard(
+                    account = account,
+                    onSync = { onSync(account.id) },
+                    onDisconnect = { onDisconnect(account.id) },
+                    onDeleteData = { onDeleteData(account.id) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProviderConnectCard(provider: EmailProvider, onConnect: () -> Unit) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFEAF8F6)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(provider.label, fontWeight = FontWeight.ExtraBold)
+                    Text(provider.scopeLabel, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Text("Search: ${provider.receiptQuery}", color = Muted, style = MaterialTheme.typography.bodySmall)
+            Button(
+                onClick = onConnect,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Teal),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Connect ${provider.label}")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmailAccountCard(
+    account: EmailConnectorAccount,
+    onSync: () -> Unit,
+    onDisconnect: () -> Unit,
+    onDeleteData: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                MerchantMark(account.provider.label)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(account.emailAddress, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(account.provider.label, color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(
+                    account.status.label,
+                    color = connectorStatusColor(account.status),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                "${account.monthlyImportCount}/${account.monthlyImportLimit} imports used this month",
+                color = Muted,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(account.lastMessage, color = Muted, style = MaterialTheme.typography.bodySmall)
+            Text(
+                "Last sync: ${account.lastSyncMillis?.formatDate() ?: "Never"}",
+                color = Muted,
+                style = MaterialTheme.typography.labelSmall
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onSync, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                    Text("Sync")
+                }
+                OutlinedButton(onClick = onDisconnect, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                    Text("Disconnect")
+                }
+            }
+            TextButton(onClick = onDeleteData) {
+                Text("Delete connector data", color = Coral)
+            }
+        }
+    }
+}
+
+private fun connectorStatusColor(status: ConnectorStatus): Color {
+    return when (status) {
+        ConnectorStatus.OAuthPending -> Amber
+        ConnectorStatus.Ready -> TealDark
+        ConnectorStatus.SyncReady -> TealDark
+        ConnectorStatus.Disconnected -> Muted
     }
 }
 
@@ -1013,6 +1191,7 @@ private fun RowScope.NavItem(screen: AppScreen, current: AppScreen, onChange: (A
         AppScreen.Home -> Icons.Default.Home
         AppScreen.Search -> Icons.Default.Search
         AppScreen.Scan -> Icons.Default.Add
+        AppScreen.Email -> Icons.Default.Email
         AppScreen.Warranties -> Icons.Default.Shield
         AppScreen.Plus -> Icons.Default.Star
         AppScreen.Detail -> Icons.Default.Info
@@ -1057,11 +1236,18 @@ private fun ReceiptVaultTheme(content: @Composable () -> Unit) {
 
 class ReceiptVaultViewModel(application: Application) : AndroidViewModel(application) {
     private val store = ReceiptStore(application)
+    private val connectorStore = EmailConnectorStore(application)
     private val ocrScanner = OcrScanner(application)
+    private val aiClient = ReceiptAiClient(application)
     private val parser = ReceiptParser()
 
     private val _receipts = MutableStateFlow(store.loadReceipts())
     val receipts: StateFlow<List<Receipt>> = _receipts
+
+    private val _emailAccounts = MutableStateFlow(connectorStore.loadAccounts())
+    val emailAccounts: StateFlow<List<EmailConnectorAccount>> = _emailAccounts
+
+    val activePlan: ReceiptVaultPlan = connectorStore.currentPlan()
 
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy
@@ -1078,7 +1264,8 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         return try {
             val id = UUID.randomUUID().toString()
             val rawText = ocrScanner.readText(uri)
-            val draft = parser.parse(rawText)
+            val localDraft = parser.parse(rawText)
+            val draft = parser.mergeWithAi(localDraft, aiClient.categorize(rawText, source))
             val imagePath = store.saveImage(uri, id)
             val receipt = Receipt(
                 id = id,
@@ -1111,6 +1298,30 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
 
     fun selectReceipt(id: String) {
         selectedReceiptId = id
+    }
+
+    fun connectEmailProvider(provider: EmailProvider) {
+        val result = connectorStore.connect(provider)
+        _emailAccounts.value = result.accounts
+        _message.value = result.message
+    }
+
+    fun syncEmailAccount(id: String) {
+        val result = connectorStore.markSyncReady(id)
+        _emailAccounts.value = result.accounts
+        _message.value = result.message
+    }
+
+    fun disconnectEmailAccount(id: String) {
+        val result = connectorStore.disconnect(id)
+        _emailAccounts.value = result.accounts
+        _message.value = result.message
+    }
+
+    fun deleteEmailAccountData(id: String) {
+        val result = connectorStore.deleteAccountData(id)
+        _emailAccounts.value = result.accounts
+        _message.value = result.message
     }
 
     fun clearMessage() {
@@ -1222,6 +1433,51 @@ private class ReceiptParser {
             returnByMillis = returnBy.toMillis(),
             warrantyUntilMillis = warrantyUntil?.toMillis(),
             notes = if (rawText.isBlank()) "Manual review needed" else "OCR processed"
+        )
+    }
+
+    fun mergeWithAi(local: ReceiptDraft, ai: ReceiptAiSuggestion?): ReceiptDraft {
+        if (ai == null || !ai.isReceipt || ai.confidence < 0.55) return local
+
+        val purchasedAt = ai.purchaseDate
+            ?.let { value -> runCatching { LocalDate.parse(value) }.getOrNull() }
+            ?: Instant.ofEpochMilli(local.purchasedAtMillis)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+
+        val amountCents = ai.total
+            ?.takeIf { it >= 0.0 }
+            ?.let { (it * 100).roundToLong() }
+            ?: local.amountCents
+
+        val returnBy = ai.returnWindowDays
+            ?.takeIf { it in 0..365 }
+            ?.let { purchasedAt.plusDays(it.toLong()).toMillis() }
+            ?: local.returnByMillis
+
+        val warrantyUntil = if (ai.warrantyCandidate) {
+            purchasedAt.plusYears(1).toMillis()
+        } else {
+            local.warrantyUntilMillis
+        }
+
+        val category = ai.category
+            ?.takeIf { it.length in 2..24 }
+            ?: local.category
+
+        val merchant = ai.merchant
+            ?.takeIf { it.length in 2..42 }
+            ?: local.merchant
+
+        val confidence = (ai.confidence * 100).roundToLong()
+        return local.copy(
+            merchant = merchant.take(42),
+            amountCents = amountCents,
+            purchasedAtMillis = purchasedAt.toMillis(),
+            category = category,
+            returnByMillis = returnBy,
+            warrantyUntilMillis = warrantyUntil,
+            notes = "Gemini categorized ${confidence}% confidence${ai.notes?.let { ": $it" } ?: ""}"
         )
     }
 
@@ -1363,6 +1619,7 @@ enum class AppScreen(val title: String, val navLabel: String) {
     Home("ReceiptVault", "Home"),
     Search("Search", "Search"),
     Scan("Add receipt", "Add"),
+    Email("Email accounts", "Email"),
     Warranties("Warranties", "Warranty"),
     Plus("ReceiptVault Plus", "Plus"),
     Detail("Receipt", "Receipt")

@@ -51,3 +51,25 @@ The endpoint asks Gemini 2.5 Flash-Lite to return structured JSON for merchant,
 total, purchase date, category, warranty candidate, return window, and
 confidence. Non-receipt text should return `isReceipt: false` with low
 confidence.
+
+## Email Connector Endpoints
+
+`GET /v1/connectors/providers` returns Gmail, Outlook, Yahoo, and IMAP setup
+metadata, including the recommended receipt-only search query and the external
+review or registration requirement.
+
+`POST /v1/connectors/candidate` requires a Firebase bearer token and accepts:
+
+```json
+{
+  "provider": "gmail",
+  "subject": "Your order confirmation",
+  "from": "store@example.com",
+  "snippet": "Thanks for your purchase",
+  "hasAttachments": true
+}
+```
+
+The response tells the connector whether it may inspect the body or attachments.
+Non-receipt messages must be discarded without storing headers, snippets, body
+text, attachments, or AI outputs.

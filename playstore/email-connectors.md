@@ -26,13 +26,15 @@ Recommended flow:
 1. Search provider mail using receipt/order keywords, sender allowlists, and
    recent-date filters.
 2. Read candidate headers and snippets first.
-3. Read body text and attachments only for likely receipt/order candidates.
-4. Run OCR and Gemini 2.5 Flash-Lite categorization only on candidate
+3. Call `POST /v1/connectors/candidate` to decide whether the message may be
+   inspected.
+4. Read body text and attachments only for likely receipt/order candidates.
+5. Run OCR and Gemini 2.5 Flash-Lite categorization only on candidate
    receipt/order text.
-5. Store only imported receipt/order records, receipt images or PDFs, source
+6. Store only imported receipt/order records, receipt images or PDFs, source
    provider, message id, merchant, purchase date, total, category, return date,
    warranty candidate, and confidence.
-6. Discard non-receipt message headers, snippets, bodies, attachments, and AI
+7. Discard non-receipt message headers, snippets, bodies, attachments, and AI
    outputs immediately.
 
 ## Provider Scope Notes

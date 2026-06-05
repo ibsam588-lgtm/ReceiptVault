@@ -15,6 +15,14 @@ type CategorizeRequest = {
   emailDate?: string;
 };
 
+type ConnectorCandidateRequest = {
+  provider?: string;
+  subject?: string;
+  from?: string;
+  snippet?: string;
+  hasAttachments?: boolean;
+};
+
 const firebaseKeys = createRemoteJWKSet(
   new URL("https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com")
 );
@@ -34,6 +42,20 @@ export default {
       if (!user) return json({ error: "unauthorized" }, 401);
 
       return categorizeReceipt(request, env);
+    }
+
+    if (url.pathname === "/v1/connectors/providers") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      return json({ ok: true, providers: connectorProviders() });
+    }
+
+    if (url.pathname === "/v1/connectors/candidate") {
+      if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+
+      const user = await authenticate(request, env);
+      if (!user) return json({ error: "unauthorized" }, 401);
+
+      return connectorCandidate(request);
     }
 
     if (!url.pathname.startsWith("/v1/receipts/")) {
@@ -73,6 +95,89 @@ export default {
     return json({ error: "method_not_allowed" }, 405);
   }
 };
+
+function connectorProviders(): Array<Record<string, unknown>> {
+  return [
+    {
+      id: "gmail",
+      label: "Gmail",
+      scope: "https://www.googleapis.com/auth/gmail.readonly",
+      restrictedScope: true,
+      query: 'newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty)',
+      reviewRequired: "Google OAuth restricted-scope verification and possible security assessment"
+    },
+    {
+      id: "outlook",
+      label: "Outlook",
+      scope: "Mail.Read delegated",
+      restrictedScope: false,
+      query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
+      reviewRequired: "Microsoft Entra app registration and user consent"
+    },
+    {
+      id: "yahoo",
+      label: "Yahoo",
+      scope: "Yahoo OAuth + IMAP read",
+      restrictedScope: false,
+      query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
+      reviewRequired: "Yahoo developer app registration"
+    },
+    {
+      id: "imap",
+      label: "Other IMAP",
+      scope: "OAuth/IMAP read",
+      restrictedScope: false,
+      query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
+      reviewRequired: "Provider-specific OAuth or IMAP credentials"
+    }
+  ];
+}
+
+async function connectorCandidate(request: Request): Promise<Response> {
+  const body = await readConnectorCandidateBody(request);
+  const text = [body.subject, body.from, body.snippet]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ")
+    .toLowerCase();
+
+  const signals = receiptSignals(text);
+  const shouldInspect = signals.length > 0;
+  return json({
+    ok: true,
+    provider: body.provider || "unknown",
+    shouldInspectBody: shouldInspect,
+    shouldInspectAttachments: shouldInspect && body.hasAttachments === true,
+    shouldStoreMessage: false,
+    matchedSignals: signals,
+    reason: shouldInspect
+      ? "Candidate looks like a receipt/order. Inspect only the body or attachments needed to import receipt data."
+      : "No receipt/order signal. Discard headers/snippet and do not inspect body or attachments."
+  });
+}
+
+async function readConnectorCandidateBody(request: Request): Promise<ConnectorCandidateRequest> {
+  try {
+    return (await request.json()) as ConnectorCandidateRequest;
+  } catch {
+    return {};
+  }
+}
+
+function receiptSignals(text: string): string[] {
+  const patterns: Array<[string, RegExp]> = [
+    ["receipt", /\breceipt\b/],
+    ["order", /\border\b|\border confirmation\b/],
+    ["invoice", /\binvoice\b/],
+    ["purchase", /\bpurchase\b|\bpurchase confirmation\b/],
+    ["shipped", /\bshipped\b|\bdelivered\b/],
+    ["return", /\breturn\b|\breturn window\b/],
+    ["warranty", /\bwarranty\b|\bprotection plan\b/],
+    ["merchant", /\bamazon\b|\bwalmart\b|\btarget\b|\bcostco\b|\bbest buy\b|\bhome depot\b|\blowe'?s\b|\bapple\b|\bstaples\b/]
+  ];
+  return patterns
+    .filter(([, pattern]) => pattern.test(text))
+    .map(([label]) => label);
+}
 
 async function categorizeReceipt(request: Request, env: Env): Promise<Response> {
   if (!env.GEMINI_API_KEY) {

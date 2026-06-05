@@ -65,7 +65,11 @@ Core promise:
 - Gallery/file image upload.
 - Email attachment import through the Android share sheet for `image/*`.
 - On-device OCR text extraction through ML Kit.
+- Firebase-authenticated Gemini 2.5 Flash-Lite categorization after OCR, with
+  local parser fallback.
 - Automatic merchant, date, amount, category, return date, and warranty suggestions.
+- Email connector screen for Gmail, Outlook, Yahoo, and IMAP account tracking,
+  sync status, disconnect, delete-data controls, and plan limit enforcement.
 - Local receipt vault, search, warranty screen, detail view, and Plus plan screen.
 
 ## Email Connector Policy
