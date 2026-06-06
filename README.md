@@ -182,10 +182,10 @@ The Play Console app exists and internal-track upload is handled by GitHub
 Actions when the Google Play service account secret is present. CI builds assign
 a unique Play `versionCode` from the GitHub run number so repeated internal-track
 uploads are not rejected. Play subscription base-plan saves are currently
-blocked until the Play payments profile has a payout/payment method. Product
-IDs and subscription pricing can be retried after that is complete. The
-Firebase privacy policy URL is live, App Content still needs the Advertising ID
-declaration, and public production access is blocked until a closed test has at
-least 12 opted-in testers for at least 14 days. Gmail verification and public
-rollout approvals still need final Play Console or provider review before
-production launch.
+blocked while Google verifies the Play payments profile bank/payment method by
+micro-deposit. Product IDs and subscription pricing can be retried after that
+verification clears. The Firebase privacy policy URL is live, App Content still
+needs the Advertising ID declaration, and public production access is blocked
+until a closed test has at least 12 opted-in testers for at least 14 days. Gmail
+verification and public rollout approvals still need final Play Console or
+provider review before production launch.

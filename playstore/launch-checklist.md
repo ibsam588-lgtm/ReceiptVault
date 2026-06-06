@@ -24,10 +24,12 @@
   Publisher subscription PATCH still returns `PERMISSION_DENIED`; the Play
   Console base-plan save for `receiptvault_plus_monthly` also fails with
   Google's generic "Your changes couldn't be saved" message.
-- As of 2026-06-06, the Play payments profile exists, but the Payments profile
-  page still prompts "Add a payment method to receive your earnings." Add the
-  payout/payment method in Play Console, then retry the base-plan save and rerun
-  the `Configure Play subscriptions` workflow.
+- As of 2026-06-06, the Play payments profile has a bank/payment method added,
+  but Google shows a bank verification step: it will deposit less than $0.25
+  within 3 business days and requires the exact amount to be entered later.
+  The owner Play Console base-plan save and `Configure Play subscriptions`
+  workflow run `27071810225` still fail until this verification or Play account
+  monetization block clears.
 - If the action logs a US-only pricing fallback, expand regional availability
   in Play Console or resolve `pricing:convertRegionPrices` access before
   production rollout.
