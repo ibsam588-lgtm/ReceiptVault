@@ -109,17 +109,15 @@ Gemini 2.5 Flash-Lite is configured through the Worker secret. AI Studio
 billing/prepay must be active for live Gemini calls; if Gemini is unavailable,
 the app falls back to local OCR parsing.
 
-Gemini project status on 2026-06-05:
+Gemini project status:
 
 - The funded prepay project is `gen-lang-client-0451935558` (`Gemini Project`,
   Tier 1 Prepay, Firebase Payment billing account).
-- The current Worker/GitHub key is still from `gen-lang-client-0123839677`,
-  which AI Studio marks as Postpay with prepay required. Live calls return
-  upstream Gemini `429` until either a key is created on the funded project and
-  stored as `GEMINI_API_KEY`, or prepay credits are added to the old key project.
-- AI Studio blocked automated key generation on the funded project as
-  suspicious, and the old project prepay flow asked to buy new credits on a
-  different billing account. Do not charge that flow without owner approval.
+- A funded-project API key was created on 2026-06-06 and stored as the GitHub
+  secret `GEMINI_API_KEY`.
+- Cloudflare workflow run `27056198992` deployed the updated Worker secret.
+- Live Worker categorization smoke test passed with `gemini-2.5-flash-lite` and
+  returned structured receipt fields.
 
 Full automatic mailbox import is not part of the MVP runtime yet. The current
 connector work stores OAuth/IMAP credentials, runs scheduled Gmail and Outlook

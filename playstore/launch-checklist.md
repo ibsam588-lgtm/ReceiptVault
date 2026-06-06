@@ -32,11 +32,10 @@
   Safety are present in the release.
 - If launching Gmail sync, complete OAuth verification for the restricted Gmail
   scope and any required security assessment before production access.
-- Gemini billing alignment: funded prepay project is
-  `gen-lang-client-0451935558`; current `GEMINI_API_KEY` belongs to
-  `gen-lang-client-0123839677`, which still requires prepay and returns upstream
-  Gemini `429`. Create a key in the funded project or fund the old key project,
-  then update `GEMINI_API_KEY` and rerun the Cloudflare Worker workflow.
+- Gemini billing alignment is complete. Funded prepay project is
+  `gen-lang-client-0451935558`; a funded-project key is stored as
+  `GEMINI_API_KEY`, Cloudflare workflow run `27056198992` deployed it, and the
+  live `/v1/ai/categorize` smoke test returned HTTP 200.
 - Renew the Microsoft Entra Outlook connector secret before 2026-12-02, or
   replace it with a certificate/federated credential. Microsoft client secrets
   cannot be set to never expire.
