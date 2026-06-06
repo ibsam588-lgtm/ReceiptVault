@@ -6,8 +6,13 @@
 - Add store listing copy from `listing-en-US.md`.
 - Upload store graphics from `graphics/` and screenshots from `screenshots/phone/`.
 - Add privacy policy URL under the Corsair Labs or Firebase Hosting URL.
+- Privacy policy URL is live:
+  `https://receiptvault-corsair.web.app/privacy/receiptvault/`.
 - Complete Data Safety using `data-safety-notes.md`.
 - Complete content rating questionnaire and target audience forms.
+- Complete the Advertising ID declaration. The Android manifest and dependency
+  scan show no advertising ID permission, ads SDK, or AdMob dependency, so the
+  expected declaration is that ReceiptVault does not use Advertising ID.
 - Create Google Play subscription products and base plans:
   `receiptvault_plus_monthly`, `receiptvault_plus_yearly`,
   `receiptvault_business_monthly`, `receiptvault_business_yearly`.
@@ -19,6 +24,10 @@
   Publisher subscription PATCH still returns `PERMISSION_DENIED`; the Play
   Console base-plan save for `receiptvault_plus_monthly` also fails with
   Google's generic "Your changes couldn't be saved" message.
+- As of 2026-06-06, the Play payments profile exists, but the Payments profile
+  page still prompts "Add a payment method to receive your earnings." Add the
+  payout/payment method in Play Console, then retry the base-plan save and rerun
+  the `Configure Play subscriptions` workflow.
 - If the action logs a US-only pricing fallback, expand regional availability
   in Play Console or resolve `pricing:convertRegionPrices` access before
   production rollout.
@@ -47,3 +56,6 @@
   remains Draft/Not reviewed in Play Console.
 - Production access on this Play account requires a closed test with at least
   12 opted-in testers for at least 14 days before applying for production.
+- As of 2026-06-06, the app dashboard shows 0 closed-test testers opted in.
+  Developer-account Policy status has no issues; ReceiptVault app Policy status
+  will show app-specific compliance information after review.
