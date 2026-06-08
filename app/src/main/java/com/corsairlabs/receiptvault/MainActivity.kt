@@ -1631,17 +1631,18 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 val summary = connectorClient.syncProvider(account.provider)
-                val result = if (summary != null) {
-                    connectorStore.markSyncReady(
-                        id = id,
-                        scanned = summary.scanned,
-                        candidates = summary.candidates,
-                        imported = summary.imported,
-                        message = summary.message
-                    )
-                } else {
-                    connectorStore.markSyncReady(id, message = "Could not reach connector sync. Check OAuth setup and try again.")
-                }
+                val result = connectorStore.markSyncReady(
+                    id = id,
+                    scanned = summary.scanned,
+                    candidates = summary.candidates,
+                    imported = summary.imported,
+                    message = summary.message
+                )
+                _emailAccounts.value = result.accounts
+                _message.value = result.message
+            } catch (error: Exception) {
+                val detail = error.message?.takeIf { it.isNotBlank() } ?: "unknown backend error"
+                val result = connectorStore.markSyncReady(id, message = "Could not reach connector sync: $detail.")
                 _emailAccounts.value = result.accounts
                 _message.value = result.message
             } finally {

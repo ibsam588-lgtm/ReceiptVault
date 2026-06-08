@@ -37,11 +37,9 @@ class EmailConnectorClient {
         }.getOrDefault(false)
     }
 
-    suspend fun syncProvider(provider: EmailProvider): ConnectorSyncSummary? {
-        return runCatching {
-            val token = firebaseToken()
-            postSync(token, provider)
-        }.getOrNull()
+    suspend fun syncProvider(provider: EmailProvider): ConnectorSyncSummary {
+        val token = firebaseToken()
+        return postSync(token, provider)
     }
 
     private suspend fun firebaseToken(): String {
@@ -73,7 +71,7 @@ class EmailConnectorClient {
 
         val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
         val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (connection.responseCode !in 200..299) throw IOException(response)
+        if (connection.responseCode !in 200..299) throw IOException(httpErrorMessage(connection.responseCode, response))
         JSONObject(response).optString("authorizationUrl", "").takeIf { it.isNotBlank() }
     }
 
@@ -101,7 +99,7 @@ class EmailConnectorClient {
 
         val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
         val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (connection.responseCode !in 200..299) throw IOException(response)
+        if (connection.responseCode !in 200..299) throw IOException(httpErrorMessage(connection.responseCode, response))
         true
     }
 
@@ -125,7 +123,7 @@ class EmailConnectorClient {
 
         val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
         val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-        if (connection.responseCode !in 200..299) throw IOException(response)
+        if (connection.responseCode !in 200..299) throw IOException(httpErrorMessage(connection.responseCode, response))
 
         val reports = JSONObject(response).optJSONArray("reports")
         val report = reports?.optJSONObject(0)
@@ -156,6 +154,21 @@ class EmailConnectorClient {
             EmailProvider.Yahoo -> "yahoo"
             EmailProvider.Imap -> "imap"
         }
+
+    private fun httpErrorMessage(statusCode: Int, response: String): String {
+        val apiError = runCatching {
+            JSONObject(response).optString("error", "")
+        }.getOrDefault("").takeIf { it.isNotBlank() }
+
+        return when (apiError) {
+            "not_found" -> "backend endpoint not found"
+            "provider_not_configured" -> "OAuth provider is not configured on the Worker"
+            "connector_encryption_not_configured" -> "connector encryption secret is missing on the Worker"
+            "unauthorized" -> "Firebase sign-in was not accepted"
+            "plus_required" -> "Plus subscription is required for cloud sync"
+            else -> apiError ?: "HTTP $statusCode"
+        }
+    }
 }
 
 private suspend fun <T> Task<T>.await(): T =
