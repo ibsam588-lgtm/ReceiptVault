@@ -53,10 +53,12 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
       - name: Upload bundle artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: receiptvault-release-aab
           path: app/build/outputs/bundle/release/app-release.aab
+          retention-days: 1
 
       - name: Upload to Google Play internal testing
         if: env.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON != ''
