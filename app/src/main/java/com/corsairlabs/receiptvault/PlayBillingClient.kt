@@ -271,8 +271,8 @@ class PlayBillingClient(private val context: Context) : PurchasesUpdatedListener
     }
 
     private suspend fun firebaseToken(): String {
-        val user = auth.currentUser ?: auth.signInAnonymously().billingAwait().user
-        val token = (user ?: throw IOException("Firebase anonymous auth unavailable"))
+        val user = auth.currentUser ?: throw IOException("Please sign in before verifying subscriptions.")
+        val token = user
             .getIdToken(false)
             .billingAwait()
             .token

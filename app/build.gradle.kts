@@ -12,6 +12,9 @@ val configuredVersionCode = (providers.environmentVariable("ANDROID_VERSION_CODE
 val configuredVersionName = providers.environmentVariable("ANDROID_VERSION_NAME").orNull
     ?: providers.gradleProperty("ANDROID_VERSION_NAME").orNull
     ?: "0.1.3"
+val googleSignInWebClientId = providers.environmentVariable("GOOGLE_SIGN_IN_WEB_CLIENT_ID").orNull
+    ?: providers.gradleProperty("GOOGLE_SIGN_IN_WEB_CLIENT_ID").orNull
+    ?: ""
 
 android {
     namespace = "com.corsairlabs.receiptvault"
@@ -25,6 +28,7 @@ android {
         versionName = configuredVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "R2_BACKUP_API_URL", "\"https://receiptvault-backup.ibsam588.workers.dev\"")
+        buildConfigField("String", "GOOGLE_SIGN_IN_WEB_CLIENT_ID", "\"${googleSignInWebClientId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     signingConfigs {
@@ -84,6 +88,7 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.play.billing)
+    implementation(libs.play.services.auth)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

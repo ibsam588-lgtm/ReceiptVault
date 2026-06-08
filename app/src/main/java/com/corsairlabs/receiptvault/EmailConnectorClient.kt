@@ -43,8 +43,8 @@ class EmailConnectorClient {
     }
 
     private suspend fun firebaseToken(): String {
-        val user = auth.currentUser ?: auth.signInAnonymously().await().user
-        val token = (user ?: throw IOException("Firebase anonymous auth unavailable"))
+        val user = auth.currentUser ?: throw IOException("Please sign in to connect email accounts.")
+        val token = user
             .getIdToken(false)
             .await()
             .token

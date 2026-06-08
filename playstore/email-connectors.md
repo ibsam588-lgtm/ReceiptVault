@@ -77,6 +77,10 @@ The production importer still needs:
 - Yahoo: `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/oauth/callback/yahoo`
 - Other IMAP: manual setup posts to `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/imap/manual`
 
+If a provider shows "invalid request" during sign-in, confirm its developer
+console has the matching `ibsam588.workers.dev` redirect URI, not the previous
+`everytools4u.workers.dev` callback.
+
 Repository and Worker secrets:
 
 - `CONNECTOR_TOKEN_ENCRYPTION_KEY`

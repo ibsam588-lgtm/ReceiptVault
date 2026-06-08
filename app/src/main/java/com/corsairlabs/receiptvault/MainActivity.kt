@@ -102,6 +102,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.tasks.Task
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -166,8 +173,22 @@ private fun ReceiptVaultRoot(
     val viewModel: ReceiptVaultViewModel = viewModel(
         factory = ReceiptVaultViewModel.factory(context.applicationContext as Application)
     )
+    val authUser by viewModel.authUser.collectAsState()
+    val authBusy by viewModel.authBusy.collectAsState()
+    val authMessage by viewModel.authMessage.collectAsState()
     var screen by rememberSaveable { mutableStateOf(AppScreen.Home) }
     var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    val googleSignInClient = remember(context) {
+        val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+        if (BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID.isNotBlank()) {
+            builder.requestIdToken(BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID)
+        }
+        GoogleSignIn.getClient(context, builder.build())
+    }
+    val googleSignInLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        viewModel.signInWithGoogle(result.data)
+    }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
         if (saved) {
@@ -189,8 +210,8 @@ private fun ReceiptVaultRoot(
         }
     }
 
-    LaunchedEffect(sharedUris) {
-        if (sharedUris.isNotEmpty()) {
+    LaunchedEffect(sharedUris, authUser) {
+        if (sharedUris.isNotEmpty() && authUser != null) {
             sharedUris.forEach { uri ->
                 viewModel.importReceipt(uri, ImportSource.EmailShare)
             }
@@ -200,27 +221,53 @@ private fun ReceiptVaultRoot(
     }
 
     ReceiptVaultTheme {
-        ReceiptVaultApp(
-            viewModel = viewModel,
-            currentScreen = screen,
-            onScreenChange = { screen = it },
-            onScan = {
-                val uri = createCameraUri(context)
-                cameraUri = uri
-                cameraLauncher.launch(uri)
-            },
-            onPickImage = { imagePicker.launch("image/*") }
-        )
+        if (authUser == null) {
+            AuthScreen(
+                isBusy = authBusy,
+                message = authMessage,
+                googleSsoAvailable = BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID.isNotBlank(),
+                onSignIn = viewModel::signInWithEmail,
+                onSignUp = viewModel::signUpWithEmail,
+                onGoogle = {
+                    if (BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID.isBlank()) {
+                        viewModel.showAuthMessage("Google SSO needs a web client ID in the release build.")
+                    } else {
+                        googleSignInLauncher.launch(googleSignInClient.signInIntent)
+                    }
+                },
+                onClearMessage = viewModel::clearAuthMessage
+            )
+        } else {
+            ReceiptVaultApp(
+                viewModel = viewModel,
+                authUser = authUser,
+                currentScreen = screen,
+                onScreenChange = { screen = it },
+                onScan = {
+                    val uri = createCameraUri(context)
+                    cameraUri = uri
+                    cameraLauncher.launch(uri)
+                },
+                onPickImage = { imagePicker.launch("image/*") },
+                onSignOut = {
+                    googleSignInClient.signOut()
+                    viewModel.signOut()
+                    screen = AppScreen.Home
+                }
+            )
+        }
     }
 }
 
 @Composable
 private fun ReceiptVaultApp(
     viewModel: ReceiptVaultViewModel,
+    authUser: ReceiptVaultAuthUser?,
     currentScreen: AppScreen,
     onScreenChange: (AppScreen) -> Unit,
     onScan: () -> Unit,
-    onPickImage: () -> Unit
+    onPickImage: () -> Unit,
+    onSignOut: () -> Unit
 ) {
     val receipts by viewModel.receipts.collectAsState()
     val emailAccounts by viewModel.emailAccounts.collectAsState()
@@ -244,7 +291,9 @@ private fun ReceiptVaultApp(
         topBar = {
             AppTopBar(
                 currentScreen = currentScreen,
-                onBack = { onScreenChange(AppScreen.Home) }
+                authUser = authUser,
+                onBack = { onScreenChange(AppScreen.Home) },
+                onSignOut = onSignOut
             )
         },
         bottomBar = {
@@ -334,9 +383,104 @@ private fun ReceiptVaultApp(
     }
 }
 
+@Composable
+private fun AuthScreen(
+    isBusy: Boolean,
+    message: String,
+    googleSsoAvailable: Boolean,
+    onSignIn: (String, String) -> Unit,
+    onSignUp: (String, String) -> Unit,
+    onGoogle: () -> Unit,
+    onClearMessage: () -> Unit
+) {
+    var email by rememberSaveable { mutableStateOf("") }
+    var password by rememberSaveable { mutableStateOf("") }
+    var signUpMode by rememberSaveable { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Soft)
+            .padding(20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("ReceiptVault", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                Text(if (signUpMode) "Create your account" else "Sign in to continue", color = Muted)
+            }
+
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = { Text("Email") },
+                singleLine = true,
+                enabled = !isBusy,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Password") },
+                singleLine = true,
+                enabled = !isBusy,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Button(
+                onClick = {
+                    if (signUpMode) onSignUp(email, password) else onSignIn(email, password)
+                },
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(if (signUpMode) "Create account" else "Sign in")
+            }
+
+            OutlinedButton(
+                onClick = onGoogle,
+                enabled = !isBusy,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(if (googleSsoAvailable) "Continue with Google" else "Google SSO setup required")
+            }
+
+            TextButton(
+                onClick = { signUpMode = !signUpMode },
+                enabled = !isBusy,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text(if (signUpMode) "I already have an account" else "Create a new account")
+            }
+        }
+
+        if (isBusy) {
+            BusyOverlay()
+        }
+
+        if (message.isNotBlank()) {
+            MessageBar(message, onDismiss = onClearMessage)
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppTopBar(currentScreen: AppScreen, onBack: () -> Unit) {
+private fun AppTopBar(
+    currentScreen: AppScreen,
+    authUser: ReceiptVaultAuthUser?,
+    onBack: () -> Unit,
+    onSignOut: () -> Unit
+) {
     TopAppBar(
         modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
         colors = TopAppBarDefaults.topAppBarColors(
@@ -347,7 +491,7 @@ private fun AppTopBar(currentScreen: AppScreen, onBack: () -> Unit) {
             Column {
                 if (currentScreen == AppScreen.Home) {
                     Text("ReceiptVault", fontWeight = FontWeight.ExtraBold)
-                    Text("Scan once. Search forever.", color = Muted, style = MaterialTheme.typography.labelMedium)
+                    Text(authUser?.email ?: "Signed in", color = Muted, style = MaterialTheme.typography.labelMedium)
                 } else {
                     Text(currentScreen.title, fontWeight = FontWeight.ExtraBold)
                 }
@@ -362,8 +506,8 @@ private fun AppTopBar(currentScreen: AppScreen, onBack: () -> Unit) {
         },
         actions = {
             if (currentScreen == AppScreen.Home) {
-                IconButton(onClick = {}) {
-                    Icon(Icons.Default.Notifications, contentDescription = "Notifications")
+                TextButton(onClick = onSignOut) {
+                    Text("Sign out")
                 }
             }
         }
@@ -1478,7 +1622,14 @@ private fun ReceiptVaultTheme(content: @Composable () -> Unit) {
     )
 }
 
+data class ReceiptVaultAuthUser(
+    val uid: String,
+    val email: String,
+    val displayName: String
+)
+
 class ReceiptVaultViewModel(application: Application) : AndroidViewModel(application) {
+    private val auth = FirebaseAuth.getInstance()
     private val store = ReceiptStore(application)
     private val connectorStore = EmailConnectorStore(application)
     private val connectorClient = EmailConnectorClient()
@@ -1486,6 +1637,19 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     private val ocrScanner = OcrScanner(application)
     private val aiClient = ReceiptAiClient(application)
     private val parser = ReceiptParser()
+
+    private val _authUser = MutableStateFlow(auth.currentUser?.toReceiptVaultAuthUser())
+    val authUser: StateFlow<ReceiptVaultAuthUser?> = _authUser
+
+    private val _authBusy = MutableStateFlow(false)
+    val authBusy: StateFlow<Boolean> = _authBusy
+
+    private val _authMessage = MutableStateFlow("")
+    val authMessage: StateFlow<String> = _authMessage
+
+    private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        _authUser.value = firebaseAuth.currentUser?.toReceiptVaultAuthUser()
+    }
 
     private val _receipts = MutableStateFlow(store.loadReceipts())
     val receipts: StateFlow<List<Receipt>> = _receipts
@@ -1512,12 +1676,92 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         get() = _receipts.value.firstOrNull { it.id == selectedReceiptId }
 
     init {
+        auth.addAuthStateListener(authStateListener)
         playBillingClient.start()
         viewModelScope.launch {
             billingState.collect {
                 _activePlan.value = connectorStore.currentPlan()
             }
         }
+    }
+
+    fun signInWithEmail(email: String, password: String) {
+        val normalizedEmail = email.trim()
+        if (!validateAuthInput(normalizedEmail, password)) return
+        _authBusy.value = true
+        viewModelScope.launch {
+            try {
+                auth.signInWithEmailAndPassword(normalizedEmail, password).authAwait()
+                _authMessage.value = "Signed in."
+            } catch (error: Exception) {
+                _authMessage.value = authErrorMessage(error)
+            } finally {
+                _authBusy.value = false
+            }
+        }
+    }
+
+    fun signUpWithEmail(email: String, password: String) {
+        val normalizedEmail = email.trim()
+        if (!validateAuthInput(normalizedEmail, password)) return
+        _authBusy.value = true
+        viewModelScope.launch {
+            try {
+                auth.createUserWithEmailAndPassword(normalizedEmail, password).authAwait()
+                _authMessage.value = "Account created."
+            } catch (error: Exception) {
+                _authMessage.value = authErrorMessage(error)
+            } finally {
+                _authBusy.value = false
+            }
+        }
+    }
+
+    fun signInWithGoogle(data: Intent?) {
+        if (data == null) {
+            _authMessage.value = "Google sign-in was canceled."
+            return
+        }
+        _authBusy.value = true
+        viewModelScope.launch {
+            try {
+                val account = GoogleSignIn.getSignedInAccountFromIntent(data).getResult(ApiException::class.java)
+                val idToken = account.idToken ?: throw IOException("Google SSO returned no ID token.")
+                val credential = GoogleAuthProvider.getCredential(idToken, null)
+                auth.signInWithCredential(credential).authAwait()
+                _authMessage.value = "Signed in with Google."
+            } catch (error: Exception) {
+                _authMessage.value = authErrorMessage(error)
+            } finally {
+                _authBusy.value = false
+            }
+        }
+    }
+
+    fun signOut() {
+        auth.signOut()
+        _authMessage.value = ""
+        _message.value = "Signed out."
+    }
+
+    fun showAuthMessage(message: String) {
+        _authMessage.value = message
+    }
+
+    fun clearAuthMessage() {
+        _authMessage.value = ""
+    }
+
+    private fun validateAuthInput(email: String, password: String): Boolean {
+        if (!email.contains("@") || !email.contains(".")) {
+            _authMessage.value = "Enter a valid email address."
+            return false
+        }
+        if (password.length < 6) {
+            _authMessage.value = "Password must be at least 6 characters."
+            return false
+        }
+        return true
     }
 
     suspend fun importReceipt(uri: Uri, source: ImportSource): Receipt? {
@@ -1688,6 +1932,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     }
 
     override fun onCleared() {
+        auth.removeAuthStateListener(authStateListener)
         playBillingClient.stop()
         super.onCleared()
     }
@@ -1700,6 +1945,33 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                     return ReceiptVaultViewModel(application) as T
                 }
             }
+    }
+}
+
+private suspend fun <T> Task<T>.authAwait(): T =
+    suspendCancellableCoroutine { continuation ->
+        addOnSuccessListener { result -> continuation.resume(result) }
+        addOnFailureListener { error -> continuation.resumeWithException(error) }
+    }
+
+private fun FirebaseUser.toReceiptVaultAuthUser(): ReceiptVaultAuthUser =
+    ReceiptVaultAuthUser(
+        uid = uid,
+        email = email ?: displayName ?: "Signed in",
+        displayName = displayName ?: email ?: "ReceiptVault user"
+    )
+
+private fun authErrorMessage(error: Exception): String {
+    if (error is ApiException && error.statusCode == 10) {
+        return "Google SSO is not configured for this app signing key yet."
+    }
+    val message = error.message?.trim().orEmpty()
+    return when {
+        message.contains("network", ignoreCase = true) -> "Network error while signing in."
+        message.contains("password", ignoreCase = true) -> "Email or password was not accepted."
+        message.contains("no user", ignoreCase = true) -> "No account found for that email."
+        message.isNotBlank() -> message
+        else -> "Could not complete sign-in."
     }
 }
 

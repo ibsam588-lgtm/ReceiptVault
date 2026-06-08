@@ -87,6 +87,9 @@ Core promise:
 - Cloudflare Worker: `https://receiptvault-backup.ibsam588.workers.dev`.
 - GitHub Actions deploy workflow: `.github/workflows/cloudflare-worker.yml`.
 - Worker deploy branch: `codex/receiptvault-android`.
+- Auth: Firebase email/password plus Google SSO. Android release builds read
+  `GOOGLE_SIGN_IN_WEB_CLIENT_ID`, falling back to `GOOGLE_OAUTH_CLIENT_ID`, from
+  GitHub Actions secrets.
 
 Current connector status, verified on 2026-06-05:
 
