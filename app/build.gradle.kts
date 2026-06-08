@@ -24,7 +24,7 @@ android {
         versionCode = configuredVersionCode
         versionName = configuredVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "R2_BACKUP_API_URL", "\"https://receiptvault-backup.everytools4u.workers.dev\"")
+        buildConfigField("String", "R2_BACKUP_API_URL", "\"https://receiptvault-backup.ibsam588.workers.dev\"")
     }
 
     signingConfigs {

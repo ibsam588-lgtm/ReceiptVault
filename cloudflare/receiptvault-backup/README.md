@@ -8,7 +8,7 @@ keys are never shipped in the Android app.
 ## Resources
 
 - Worker name: `receiptvault-backup`
-- Worker URL: `https://receiptvault-backup.everytools4u.workers.dev`
+- Worker URL: `https://receiptvault-backup.ibsam588.workers.dev`
 - R2 bucket: `receiptvault-receipts`
 - Firebase project: `receiptvault-corsair`
 
@@ -97,9 +97,9 @@ review or registration requirement.
 
 OAuth app redirect URIs:
 
-- Gmail: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/gmail`
-- Outlook: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/outlook`
-- Yahoo: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/yahoo`
+- Gmail: `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/oauth/callback/gmail`
+- Outlook: `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/oauth/callback/outlook`
+- Yahoo: `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/oauth/callback/yahoo`
 
 `POST /v1/connectors/oauth/start` requires a Firebase bearer token and returns a
 provider authorization URL when that provider's client id/secret are configured.

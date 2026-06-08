@@ -72,10 +72,10 @@ The production importer still needs:
 
 ## OAuth App Redirect URIs
 
-- Gmail: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/gmail`
-- Outlook: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/outlook`
-- Yahoo: `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/oauth/callback/yahoo`
-- Other IMAP: manual setup posts to `https://receiptvault-backup.everytools4u.workers.dev/v1/connectors/imap/manual`
+- Gmail: `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/oauth/callback/gmail`
+- Outlook: `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/oauth/callback/outlook`
+- Yahoo: `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/oauth/callback/yahoo`
+- Other IMAP: manual setup posts to `https://receiptvault-backup.ibsam588.workers.dev/v1/connectors/imap/manual`
 
 Repository and Worker secrets:
 

@@ -84,7 +84,7 @@ Core promise:
 
 - Android package: `com.corsairlabs.receiptvault`.
 - Firebase project: `receiptvault-corsair`.
-- Cloudflare Worker: `https://receiptvault-backup.everytools4u.workers.dev`.
+- Cloudflare Worker: `https://receiptvault-backup.ibsam588.workers.dev`.
 - GitHub Actions deploy workflow: `.github/workflows/cloudflare-worker.yml`.
 - Worker deploy branch: `codex/receiptvault-android`.
 
