@@ -133,8 +133,13 @@ Google Play Billing product IDs:
 - `receiptvault_business_monthly`
 - `receiptvault_business_yearly`
 
-Worker secret still needed for production subscription verification:
-`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
+These products and their `standard` base plans are active in Play Console as of
+2026-06-08. GitHub Action run `27130931877` configured and activated them
+through the Android Publisher API after granting the Play deploy service account
+app-level Admin permissions for ReceiptVault.
+
+Production subscription verification uses the Cloudflare Worker secret
+`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`, deployed from the matching GitHub secret.
 
 ## Email Connector Policy
 
@@ -181,11 +186,9 @@ Play Store listing copy, data safety notes, and launch checklist are in `playsto
 The Play Console app exists and internal-track upload is handled by GitHub
 Actions when the Google Play service account secret is present. CI builds assign
 a unique Play `versionCode` from the GitHub run number so repeated internal-track
-uploads are not rejected. Play subscription base-plan saves are currently
-blocked while Google verifies the Play payments profile bank/payment method by
-micro-deposit. Product IDs and subscription pricing can be retried after that
-verification clears. The Firebase privacy policy URL is live, App Content still
-needs the Advertising ID declaration, and public production access is blocked
-until a closed test has at least 12 opted-in testers for at least 14 days. Gmail
-verification and public rollout approvals still need final Play Console or
-provider review before production launch.
+uploads are not rejected. Play subscription products are active with monthly and
+yearly Plus/Business base plans. The Firebase privacy policy URL is live, App
+Content still needs the Advertising ID declaration, and public production access
+is blocked until a closed test has at least 12 opted-in testers for at least 14
+days. Gmail verification and public rollout approvals still need final Play
+Console or provider review before production launch.

@@ -16,28 +16,18 @@
 - Create Google Play subscription products and base plans:
   `receiptvault_plus_monthly`, `receiptvault_plus_yearly`,
   `receiptvault_business_monthly`, `receiptvault_business_yearly`.
-- Run the `Configure Play subscriptions` GitHub Action to create or patch the
-  subscriptions through the Android Publisher API and activate each `standard`
-  base plan.
-- As of 2026-06-05, the subscription action reaches
-  `play-deploy@sacred-evening-412414.iam.gserviceaccount.com` but the Android
-  Publisher subscription PATCH still returns `PERMISSION_DENIED`; the Play
-  Console base-plan save for `receiptvault_plus_monthly` also fails with
-  Google's generic "Your changes couldn't be saved" message.
-- As of 2026-06-06, the Play payments profile has a bank/payment method added,
-  but Google shows a bank verification step: it will deposit less than $0.25
-  within 3 business days and requires the exact amount to be entered later.
-  The owner Play Console base-plan save and `Configure Play subscriptions`
-  workflow run `27071810225` still fail until this verification or Play account
-  monetization block clears.
-- If the action logs a US-only pricing fallback, expand regional availability
-  in Play Console or resolve `pricing:convertRegionPrices` access before
-  production rollout.
+- Google Play subscription products and `standard` base plans are active as of
+  2026-06-08. `Configure Play subscriptions` workflow run `27130931877`
+  configured and activated all four products through the Android Publisher API.
+- The Play deploy service account
+  `play-deploy@sacred-evening-412414.iam.gserviceaccount.com` has app-level
+  Admin permissions for ReceiptVault. This resolved the prior Android Publisher
+  API `PERMISSION_DENIED` failure and regional price conversion access.
 - Confirm the Android app can query the live Google Play Billing products on
   the internal testing track.
-- Add the Google Play service account JSON as the Cloudflare Worker secret
-  `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` so server-side subscription verification
-  can unlock R2 backup.
+- Google Play service account JSON is configured as the GitHub secret
+  `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` and deployed to the Cloudflare Worker as
+  the Worker secret of the same name for server-side subscription verification.
 - If launching automatic email connectors, confirm the prominent mailbox
   consent screen, per-account disconnect/delete controls, and updated Data
   Safety are present in the release.
@@ -50,10 +40,9 @@
 - Renew the Microsoft Entra Outlook connector secret before 2026-12-02, or
   replace it with a certificate/federated credential. Microsoft client secrets
   cannot be set to never expire.
-- Add the Google Play service account JSON as the GitHub secret
-  `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`.
-- Add Cloudflare deployment secrets: `CLOUDFLARE_API_TOKEN` and
-  `CLOUDFLARE_ACCOUNT_ID`.
+- GitHub secret `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` is configured.
+- Cloudflare deployment secrets `CLOUDFLARE_API_TOKEN` and
+  `CLOUDFLARE_ACCOUNT_ID` are configured.
 - Internal testing is active after the GitHub Android workflow upload. The app
   remains Draft/Not reviewed in Play Console.
 - Production access on this Play account requires a closed test with at least

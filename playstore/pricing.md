@@ -44,8 +44,8 @@ Price: $12.99/month or $124.99/year
 - Team-ready export package.
 - Priority support.
 
-Google Play Billing product IDs should be created after the Play Console app is
-created. The Android app is already wired to these IDs:
+Google Play Billing product IDs are active in Play Console. The Android app is
+already wired to these IDs:
 
 - `receiptvault_plus_monthly`
 - `receiptvault_plus_yearly`
