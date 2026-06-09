@@ -104,6 +104,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
@@ -1962,8 +1963,20 @@ private fun FirebaseUser.toReceiptVaultAuthUser(): ReceiptVaultAuthUser =
     )
 
 private fun authErrorMessage(error: Exception): String {
-    if (error is ApiException && error.statusCode == 10) {
-        return "Google SSO is not configured for this app signing key yet."
+    if (error is ApiException) {
+        return when (error.statusCode) {
+            GoogleSignInStatusCodes.DEVELOPER_ERROR ->
+                "Google SSO is not configured for this app signing key yet. Register the release " +
+                    "(upload and Play App Signing) SHA-1 fingerprints in Firebase, then rebuild."
+            GoogleSignInStatusCodes.SIGN_IN_CANCELLED ->
+                "Google sign-in was canceled."
+            GoogleSignInStatusCodes.SIGN_IN_CURRENTLY_IN_PROGRESS ->
+                "A Google sign-in is already in progress."
+            GoogleSignInStatusCodes.NETWORK_ERROR ->
+                "Network error during Google sign-in. Check the connection and try again."
+            else ->
+                "Google sign-in failed (${GoogleSignInStatusCodes.getStatusCodeString(error.statusCode)})."
+        }
     }
     val message = error.message?.trim().orEmpty()
     return when {

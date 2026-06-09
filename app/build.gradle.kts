@@ -16,6 +16,14 @@ val googleSignInWebClientId = providers.environmentVariable("GOOGLE_SIGN_IN_WEB_
     ?: providers.gradleProperty("GOOGLE_SIGN_IN_WEB_CLIENT_ID").orNull
     ?: ""
 
+if (googleSignInWebClientId.isBlank()) {
+    logger.warn(
+        "ReceiptVault: GOOGLE_SIGN_IN_WEB_CLIENT_ID is not set. The build will ship with " +
+            "Google SSO disabled. Provide the Firebase Web OAuth client ID via the env var or " +
+            "gradle property to enable \"Continue with Google\"."
+    )
+}
+
 android {
     namespace = "com.corsairlabs.receiptvault"
     compileSdk = 36
