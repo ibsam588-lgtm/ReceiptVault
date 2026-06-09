@@ -91,6 +91,33 @@ Core promise:
   `GOOGLE_SIGN_IN_WEB_CLIENT_ID`, falling back to `GOOGLE_OAUTH_CLIENT_ID`, from
   GitHub Actions secrets.
 
+### Google SSO setup and troubleshooting
+
+Google SSO ("Continue with Google") requires Firebase project configuration in
+addition to the app code. If sign-in fails with *"Google SSO is not configured
+for this app signing key yet"* (Play Services `DEVELOPER_ERROR`, status `10`),
+the OAuth client / SHA-1 registration is missing. The committed
+`app/google-services.json` has an empty `oauth_client` array, which means no
+SHA-1 fingerprints are registered yet. To fix:
+
+1. In the Firebase Console for project `receiptvault-corsair`, open
+   **Project settings → Your apps → ReceiptVault (`com.corsairlabs.receiptvault`)**.
+2. Add the **SHA-1 fingerprint of the upload key** (the keystore used by the
+   `Android internal testing` workflow). Get it with
+   `keytool -list -v -keystore <upload-keystore> -alias <key-alias>`.
+3. Add the **SHA-1 of the Play App Signing key** as well. Find it in
+   **Play Console → Test and release → App integrity → App signing**. This is
+   the most common cause of SSO working in debug but failing on the Play build,
+   because Play re-signs the bundle with a different key.
+4. Under **APIs & Services → Credentials** in Google Cloud, copy the
+   **Web application** OAuth client ID (type *Web*, not *Android*). The app
+   passes this to `requestIdToken`.
+5. Set it as the GitHub Actions secret `GOOGLE_SIGN_IN_WEB_CLIENT_ID` (or
+   `GOOGLE_OAUTH_CLIENT_ID`). Release builds read it into `BuildConfig`; if it
+   is blank the build logs a warning and ships with the Google button disabled.
+6. Re-download `google-services.json` after registering the SHA-1 fingerprints
+   so its `oauth_client` array is populated, and commit it.
+
 Current connector status, verified on 2026-06-05:
 
 - Gmail: configured. Uses `gmail.readonly` and the receipt-only search query

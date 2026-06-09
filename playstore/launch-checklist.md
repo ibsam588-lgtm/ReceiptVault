@@ -31,6 +31,12 @@
 - If launching automatic email connectors, confirm the prominent mailbox
   consent screen, per-account disconnect/delete controls, and updated Data
   Safety are present in the release.
+- For Google SSO, register the upload-key and Play App Signing SHA-1
+  fingerprints in the Firebase project `receiptvault-corsair`, set the
+  `GOOGLE_SIGN_IN_WEB_CLIENT_ID` GitHub secret to the Web OAuth client ID, and
+  re-commit a `google-services.json` whose `oauth_client` array is populated.
+  Until then "Continue with Google" fails with `DEVELOPER_ERROR` (status 10).
+  See the SSO troubleshooting section in `README.md`.
 - If launching Gmail sync, complete OAuth verification for the restricted Gmail
   scope and any required security assessment before production access.
 - Gemini billing alignment is complete. Funded prepay project is
