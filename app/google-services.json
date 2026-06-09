@@ -12,7 +12,20 @@
           "package_name": "com.corsairlabs.receiptvault"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "317421736638-h2k1582f2lhacnjqeshrvea75ime1e6l.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.corsairlabs.receiptvault",
+            "certificate_hash": "bb8e5fbe5bbac13da8e939b039f4a951bff86712"
+          }
+        },
+        {
+          "client_id": "317421736638-h4baebkt7vpk4hsfah6n684jpvj0n82p.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBBvEnGcBbwuY1-HR2YcPth5of4_d94gzA"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "317421736638-7c5d627pfokid3fu7dovl7sto69v8ivb.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
