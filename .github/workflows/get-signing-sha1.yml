@@ -112,39 +112,41 @@ jobs:
                           apk_path = f.name
                       print(f"Downloaded APK: {os.path.getsize(apk_path)} bytes")
 
-                      with zipfile.ZipFile(apk_path) as z:
-                          cert_names = [
-                              n for n in z.namelist()
-                              if n.startswith('META-INF/') and n.endswith(('.RSA', '.DSA', '.EC'))
-                          ]
-                          print(f"Cert files in APK: {cert_names}")
-                          if cert_names:
-                              cert_data = z.read(cert_names[0])
-                              with open('/tmp/signing.rsa', 'wb') as cf:
-                                  cf.write(cert_data)
+                      # Use apksigner (handles V2/V3 APK signing schemes)
+                      import glob as _glob
+                      apksigner_paths = sorted(_glob.glob('/usr/local/lib/android/sdk/build-tools/*/apksigner'))
+                      if not apksigner_paths:
+                          apksigner_paths = sorted(_glob.glob('/opt/android-sdk/build-tools/*/apksigner'))
+                      if not apksigner_paths:
+                          # Try finding via which
+                          r_which = subprocess.run(['which', 'apksigner'], capture_output=True, text=True)
+                          if r_which.returncode == 0:
+                              apksigner_paths = [r_which.stdout.strip()]
 
-                              r1 = subprocess.run(
-                                  ['openssl', 'pkcs7', '-inform', 'DER', '-in', '/tmp/signing.rsa',
-                                   '-out', '/tmp/signing.pem', '-print_certs'],
-                                  capture_output=True, text=True
-                              )
-                              if r1.returncode != 0:
-                                  print(f"pkcs7 error: {r1.stderr}")
-
-                              r2 = subprocess.run(
-                                  ['openssl', 'x509', '-noout', '-fingerprint', '-sha1',
-                                   '-in', '/tmp/signing.pem'],
-                                  capture_output=True, text=True
-                              )
-                              print("\n=== PLAY APP SIGNING SHA-1 FINGERPRINT ===")
-                              sha1_line = r2.stdout.strip()
-                              print(sha1_line)
-                              if '=' in sha1_line:
-                                  sha1 = sha1_line.split('=', 1)[1]
-                                  print(f"\nSHA-1 (for Firebase, with colons): {sha1}")
-                                  print(f"SHA-1 (no colons, lowercase): {sha1.replace(':', '').lower()}")
-                              print("==========================================")
-                          break  # one signing key is enough
+                      print(f"apksigner candidates: {apksigner_paths}")
+                      if apksigner_paths:
+                          apksigner = apksigner_paths[-1]  # latest version
+                          r_sign = subprocess.run([apksigner, 'verify', '--print-certs', apk_path],
+                                                  capture_output=True, text=True)
+                          print("\n=== APKSIGNER CERT OUTPUT ===")
+                          print(r_sign.stdout)
+                          if r_sign.stderr:
+                              print("stderr:", r_sign.stderr[:500])
+                          # Extract SHA-1 from output
+                          for line in r_sign.stdout.splitlines():
+                              if 'SHA-1' in line or 'sha-1' in line.lower():
+                                  print(f"\n=== PLAY APP SIGNING SHA-1 FINGERPRINT ===")
+                                  print(line)
+                                  # apksigner prints hex without colons; format with colons
+                                  raw = line.split(':')[-1].strip()
+                                  if len(raw) == 40:
+                                      with_colons = ':'.join(raw[i:i+2].upper() for i in range(0, 40, 2))
+                                      print(f"SHA-1 (for Firebase, with colons): {with_colons}")
+                                      print(f"SHA-1 (no colons, lowercase): {raw.lower()}")
+                                  print("==========================================")
+                      else:
+                          print("apksigner not found! Install Android SDK build-tools.")
+                      break  # one signing key is enough
 
               except Exception as e:
                   import traceback
