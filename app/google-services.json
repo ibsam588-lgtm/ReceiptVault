@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "317421736638-r1uk348hlgqtk6gemk4a3nu8aombn9ps.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.corsairlabs.receiptvault",
+            "certificate_hash": "845e86039567ddd51ceb11be6205d35ba6164a39"
+          }
+        },
+        {
           "client_id": "317421736638-h4baebkt7vpk4hsfah6n684jpvj0n82p.apps.googleusercontent.com",
           "client_type": 3
         }
