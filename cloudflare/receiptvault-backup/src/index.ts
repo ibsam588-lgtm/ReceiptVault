@@ -893,6 +893,7 @@ async function syncProviderForUser(
         ? await fetchGmailMessageFullText(refreshed.access_token as string, candidate.id)
         : candidate.snippet || "";
       const purchasedAtMs = candidate.date ? Date.parse(candidate.date) : Date.now();
+      // Use bodyText only in memory for extraction — do NOT persist raw email content
       const receipt: Record<string, unknown> = {
         id: receiptId,
         merchant: extractMerchant(candidate.from || ""),
@@ -903,7 +904,7 @@ async function syncProviderForUser(
         returnByMillis: null,
         warrantyUntilMillis: null,
         notes: `Imported from ${candidate.from || "email"} — ${candidate.subject || "no subject"}`,
-        rawText: `${candidate.subject || ""}\n${bodyText}`.slice(0, 2000),
+        rawText: "",
         imagePath: "",
         source: "EmailShare"
       };
@@ -1251,8 +1252,19 @@ async function deleteConnectorAccount(request: Request, env: Env, user: JWTPaylo
   const userId = String(user.sub || "");
   await env.RECEIPTS_BUCKET.delete(connectorTokenObjectName(userId, provider));
   await env.RECEIPTS_BUCKET.delete(connectorSyncReportObjectName(userId, provider));
+  await deleteProviderReceipts(env, userId, provider);
   await removeConnectorUserIndexIfEmpty(env, userId);
   return json({ ok: true, provider });
+}
+
+async function deleteProviderReceipts(env: Env, userId: string, provider: ConnectorProviderId): Promise<void> {
+  const prefix = `users/${userId}/receipts/${provider}-`;
+  let cursor: string | undefined;
+  do {
+    const listed = await env.RECEIPTS_BUCKET.list({ prefix, cursor, limit: 100 });
+    await Promise.all(listed.objects.map((obj) => env.RECEIPTS_BUCKET.delete(obj.key)));
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
 }
 
 function connectorTokenObjectName(userId: string, provider: ConnectorProviderId): string {
