@@ -1055,14 +1055,14 @@ async function fetchGmailMessageFullText(accessToken: string, messageId: string)
   url.searchParams.set("format", "full");
   const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
   if (!response.ok) return "";
-  const message = await response.json<Record<string, unknown>>().catch(() => ({}));
-  const payload = isRecord(message.payload) ? message.payload : {};
+  const message: Record<string, unknown> = await response.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  const payload: Record<string, unknown> = isRecord(message.payload) ? message.payload : {};
   return extractPartsText(payload).slice(0, 4000);
 }
 
 function extractPartsText(part: Record<string, unknown>): string {
   const mimeType = typeof part.mimeType === "string" ? part.mimeType : "";
-  const body = isRecord(part.body) ? part.body : {};
+  const body: Record<string, unknown> = isRecord(part.body) ? part.body : {};
   const data = typeof body.data === "string" ? body.data : "";
   if (data && mimeType.startsWith("text/")) {
     const decoded = new TextDecoder().decode(base64UrlDecode(data));
