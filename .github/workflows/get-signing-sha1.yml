@@ -38,50 +38,51 @@ jobs:
           service = build('androidpublisher', 'v3', credentials=creds)
           pkg = 'com.corsairlabs.receiptvault'
 
-          # Create a temporary edit
+          # Create a temporary edit (needed for bundles.list)
           edit = service.edits().insert(packageName=pkg, body={}).execute()
           edit_id = edit['id']
           print(f"Edit ID: {edit_id}")
 
           try:
-              bundles = service.bundles().list(packageName=pkg, editId=edit_id).execute()
+              # List bundles within the edit context
+              bundles = service.edits().bundles().list(packageName=pkg, editId=edit_id).execute()
               bundles_list = bundles.get('bundles', [])
               print(f"Total bundles found: {len(bundles_list)}")
 
               if not bundles_list:
-                  print("ERROR: No bundles found. Play App Signing may not be enrolled.")
+                  print("ERROR: No bundles found. Trying version code 1026 directly...")
+                  latest_vc = 1026
               else:
                   latest_vc = max(b['versionCode'] for b in bundles_list)
-                  print(f"Latest bundle version code: {latest_vc}")
+              print(f"Using version code: {latest_vc}")
 
-                  # Get generated APKs for the latest version
+              # Get generated APKs (top-level resource, no edit needed)
+              try:
                   gen_apks = service.generatedapks().list(
                       packageName=pkg, versionCode=latest_vc
                   ).execute()
                   gen_list = gen_apks.get('generatedApks', [])
                   print(f"Generated APKs count: {len(gen_list)}")
-                  print(f"Generated APKs info: {json.dumps(gen_list[:2], indent=2)}")
+                  if gen_list:
+                      print(f"First APK info: {json.dumps(gen_list[0], indent=2)}")
 
-                  if not gen_list:
-                      print("No generated APKs found")
-                  else:
-                      # Get the first generated APK (usually universal)
+                  if gen_list:
                       dl_id = gen_list[0]['downloadId']
                       url = (
                           f'https://androidpublisher.googleapis.com'
                           f'/androidpublisher/v3/applications/{pkg}'
                           f'/generatedApks/{latest_vc}/downloads/{dl_id}/download'
                       )
-                      print(f"Downloading APK from: {url[:80]}...")
+                      print(f"Downloading APK...")
                       headers = {'Authorization': f'Bearer {creds.token}'}
-                      resp = req_lib.get(url, headers=headers, stream=True, timeout=120)
+                      resp = req_lib.get(url, headers=headers, stream=True, timeout=180, allow_redirects=True)
                       resp.raise_for_status()
 
                       with tempfile.NamedTemporaryFile(suffix='.apk', delete=False) as f:
                           for chunk in resp.iter_content(1024 * 1024):
                               f.write(chunk)
                           apk_path = f.name
-                      print(f"Downloaded APK to: {apk_path}")
+                      print(f"Downloaded APK ({os.path.getsize(apk_path)} bytes)")
 
                       # Extract signing cert from APK
                       with zipfile.ZipFile(apk_path) as z:
@@ -89,7 +90,7 @@ jobs:
                               n for n in z.namelist()
                               if n.startswith('META-INF/') and n.endswith(('.RSA', '.DSA', '.EC'))
                           ]
-                          print(f"Found cert files: {cert_names}")
+                          print(f"Cert files in APK: {cert_names}")
                           if cert_names:
                               cert_data = z.read(cert_names[0])
                               with open('/tmp/signing.rsa', 'wb') as cf:
@@ -102,22 +103,34 @@ jobs:
                                   capture_output=True, text=True
                               )
                               if r1.returncode != 0:
-                                  print(f"openssl pkcs7 error: {r1.stderr}")
-                              else:
-                                  # Get SHA-1 fingerprint
-                                  r2 = subprocess.run(
-                                      ['openssl', 'x509', '-noout', '-fingerprint', '-sha1',
-                                       '-in', '/tmp/signing.pem'],
+                                  print(f"openssl error: {r1.stderr}")
+                                  # Try alternative: extract raw cert
+                                  r1b = subprocess.run(
+                                      ['openssl', 'smime', '-verify', '-noverify', '-inform', 'DER',
+                                       '-in', '/tmp/signing.rsa', '-signer', '/tmp/signing.pem'],
                                       capture_output=True, text=True
                                   )
-                                  print("\n=== PLAY APP SIGNING SHA-1 FINGERPRINT ===")
-                                  sha1_line = r2.stdout.strip()
-                                  print(sha1_line)
-                                  if '=' in sha1_line:
-                                      sha1 = sha1_line.split('=', 1)[1]
-                                      print(f"\nSHA-1 (for Firebase, with colons): {sha1}")
-                                      print(f"SHA-1 (no colons, lowercase): {sha1.replace(':', '').lower()}")
-                                  print("==========================================")
+                              
+                              # Get SHA-1 fingerprint
+                              r2 = subprocess.run(
+                                  ['openssl', 'x509', '-noout', '-fingerprint', '-sha1',
+                                   '-in', '/tmp/signing.pem'],
+                                  capture_output=True, text=True
+                              )
+                              print("\n=== PLAY APP SIGNING SHA-1 FINGERPRINT ===")
+                              sha1_line = r2.stdout.strip()
+                              print(sha1_line)
+                              if '=' in sha1_line:
+                                  sha1 = sha1_line.split('=', 1)[1]
+                                  print(f"\nSHA-1 (for Firebase, with colons): {sha1}")
+                                  print(f"SHA-1 (no colons, lowercase): {sha1.replace(':', '').lower()}")
+                              print("==========================================")
+                  else:
+                      print("No generated APKs found for version code", latest_vc)
+              except Exception as e:
+                  import traceback
+                  print(f"Error getting generated APKs: {e}")
+                  traceback.print_exc()
           finally:
               service.edits().delete(packageName=pkg, editId=edit_id).execute()
               print("Edit deleted.")
