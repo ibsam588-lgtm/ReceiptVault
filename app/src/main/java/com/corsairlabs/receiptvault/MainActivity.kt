@@ -147,26 +147,39 @@ private val VaultBlue = Color(0xFF4367DC)
 
 class MainActivity : ComponentActivity() {
     private var sharedUris by mutableStateOf<List<Uri>>(emptyList())
+    private var oauthCallbackPending by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sharedUris = extractSharedImageUris(intent)
+        if (isOAuthCallback(intent)) oauthCallbackPending = true
         setContent {
-            ReceiptVaultRoot(sharedUris) {
-                sharedUris = emptyList()
-            }
+            ReceiptVaultRoot(
+                sharedUris = sharedUris,
+                oauthCallbackPending = oauthCallbackPending,
+                onOAuthCallbackConsumed = { oauthCallbackPending = false },
+                onSharedUrisConsumed = { sharedUris = emptyList() }
+            )
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         sharedUris = extractSharedImageUris(intent)
+        if (isOAuthCallback(intent)) oauthCallbackPending = true
+    }
+
+    private fun isOAuthCallback(intent: Intent): Boolean {
+        val data = intent.data ?: return false
+        return data.scheme == "receiptvault" && data.host == "connectors"
     }
 }
 
 @Composable
 private fun ReceiptVaultRoot(
     sharedUris: List<Uri>,
+    oauthCallbackPending: Boolean = false,
+    onOAuthCallbackConsumed: () -> Unit = {},
     onSharedUrisConsumed: () -> Unit
 ) {
     val context = LocalContext.current
@@ -174,6 +187,15 @@ private fun ReceiptVaultRoot(
     val viewModel: ReceiptVaultViewModel = viewModel(
         factory = ReceiptVaultViewModel.factory(context.applicationContext as Application)
     )
+
+    // When the app returns from the OAuth browser via receiptvault://connectors deep link,
+    // refresh the connector account list from the Worker to get the real email + Ready status.
+    LaunchedEffect(oauthCallbackPending) {
+        if (oauthCallbackPending) {
+            viewModel.refreshConnectorAccounts()
+            onOAuthCallbackConsumed()
+        }
+    }
     val authUser by viewModel.authUser.collectAsState()
     val authBusy by viewModel.authBusy.collectAsState()
     val authMessage by viewModel.authMessage.collectAsState()
@@ -1920,6 +1942,22 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         if (provider != null) {
             viewModelScope.launch {
                 connectorClient.deleteAccount(provider)
+            }
+        }
+    }
+
+    /**
+     * Called when the app returns from the OAuth browser flow via the receiptvault://connectors
+     * deep link. Fetches the real account list from the Worker and updates local state so the
+     * email address and Ready status are shown instead of the placeholder.
+     */
+    fun refreshConnectorAccounts() {
+        viewModelScope.launch {
+            val remote = connectorClient.fetchRemoteAccounts()
+            if (remote.isNotEmpty()) {
+                val updated = connectorStore.syncFromRemote(remote)
+                _emailAccounts.value = updated
+                _message.value = "Email accounts updated."
             }
         }
     }

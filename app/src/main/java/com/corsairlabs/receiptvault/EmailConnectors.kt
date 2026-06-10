@@ -208,6 +208,51 @@ class EmailConnectorStore(private val context: Context) {
         return ConnectorStoreResult(updated, "Connector and imported email metadata deleted.")
     }
 
+    /**
+     * Merges remote account data (from the Worker's /v1/connectors/accounts) into local
+     * SharedPreferences. Accounts that are connected on the server get their email address
+     * and status updated. Local accounts whose server token was deleted get marked Disconnected.
+     */
+    fun syncFromRemote(remoteAccounts: List<RemoteConnectorAccount>): List<EmailConnectorAccount> {
+        val local = loadAccounts().toMutableList()
+        val remoteByProvider = remoteAccounts.associateBy { it.provider }
+
+        // Update existing local entries with real email + Ready status
+        val updated = local.map { account ->
+            val remote = remoteByProvider[account.provider]
+            if (remote != null && remote.connected && account.status != ConnectorStatus.Disconnected) {
+                account.copy(
+                    emailAddress = remote.emailAddress ?: account.emailAddress,
+                    status = ConnectorStatus.Ready,
+                    lastMessage = "Connected. Tap Sync to import receipts."
+                )
+            } else {
+                account
+            }
+        }.toMutableList()
+
+        // Add any remote accounts that don't have a local entry yet
+        val localProviders = updated.map { it.provider }.toSet()
+        val plan = currentPlan()
+        for (remote in remoteAccounts) {
+            if (remote.connected && remote.provider !in localProviders) {
+                updated.add(EmailConnectorAccount(
+                    id = java.util.UUID.randomUUID().toString(),
+                    provider = remote.provider,
+                    emailAddress = remote.emailAddress ?: "${remote.provider.label} account",
+                    status = ConnectorStatus.Ready,
+                    monthlyImportCount = 0,
+                    monthlyImportLimit = plan.monthlyEmailImports,
+                    lastSyncMillis = null,
+                    lastMessage = "Connected. Tap Sync to import receipts."
+                ))
+            }
+        }
+
+        saveAccounts(updated)
+        return updated
+    }
+
     private fun saveAccounts(accounts: List<EmailConnectorAccount>) {
         prefs.edit()
             .putString("accounts", JSONArray(accounts.map { it.toJson() }).toString())

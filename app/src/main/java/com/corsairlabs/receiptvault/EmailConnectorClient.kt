@@ -10,7 +10,14 @@ import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
+
+data class RemoteConnectorAccount(
+    val provider: EmailProvider,
+    val emailAddress: String?,
+    val connected: Boolean
+)
 
 class EmailConnectorClient {
     private val auth = FirebaseAuth.getInstance()
@@ -35,6 +42,13 @@ class EmailConnectorClient {
             val token = firebaseToken()
             postManualImap(token, config)
         }.getOrDefault(false)
+    }
+
+    suspend fun fetchRemoteAccounts(): List<RemoteConnectorAccount> {
+        return runCatching {
+            val token = firebaseToken()
+            getRemoteAccounts(token)
+        }.getOrDefault(emptyList())
     }
 
     suspend fun syncProvider(provider: EmailProvider): ConnectorSyncSummary {
@@ -133,6 +147,40 @@ class EmailConnectorClient {
             imported = report?.optInt("imported", 0) ?: 0,
             message = report?.optString("message", "Receipt-only sync check completed.") ?: "Receipt-only sync check completed."
         )
+    }
+
+    private suspend fun getRemoteAccounts(token: String): List<RemoteConnectorAccount> = withContext(Dispatchers.IO) {
+        val connection = (URL("$apiBase/v1/connectors/accounts").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 15000
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+        val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+        val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        if (connection.responseCode !in 200..299) return@withContext emptyList()
+
+        val accounts = JSONObject(response).optJSONArray("accounts") ?: JSONArray()
+        buildList {
+            for (i in 0 until accounts.length()) {
+                val obj = accounts.getJSONObject(i)
+                val providerStr = obj.optString("provider", "")
+                val provider = providerIdToEnum(providerStr) ?: continue
+                add(RemoteConnectorAccount(
+                    provider = provider,
+                    emailAddress = obj.optString("emailAddress", "").takeIf { it.isNotBlank() },
+                    connected = obj.optBoolean("connected", false)
+                ))
+            }
+        }
+    }
+
+    private fun providerIdToEnum(id: String): EmailProvider? = when (id) {
+        "gmail" -> EmailProvider.Gmail
+        "outlook" -> EmailProvider.Outlook
+        "yahoo" -> EmailProvider.Yahoo
+        "imap" -> EmailProvider.Imap
+        else -> null
     }
 
     private suspend fun deleteConnectorToken(token: String, provider: EmailProvider): Boolean = withContext(Dispatchers.IO) {
