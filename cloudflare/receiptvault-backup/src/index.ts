@@ -457,7 +457,7 @@ function providerConfig(provider: ConnectorProviderId, env: Env): OAuthProviderC
       clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
       scope: "https://www.googleapis.com/auth/gmail.readonly",
       restrictedScope: true,
-      query: 'newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty)',
+      query: 'newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty) -from:google.com -from:googleplay.com',
       reviewRequired: "Google OAuth restricted-scope verification and possible security assessment"
     };
   }
@@ -878,10 +878,13 @@ async function syncProviderForUser(
     const candidates = providerId === "gmail"
       ? await fetchGmailCandidates(provider, refreshed.access_token, maxCandidates)
       : await fetchOutlookCandidates(provider, refreshed.access_token, maxCandidates);
-    const receiptCandidates = candidates.map((candidate) => ({
-      ...candidate,
-      signals: receiptSignals(candidateText(candidate))
-    })).filter((candidate) => candidate.signals.length > 0);
+    const receiptCandidates = candidates
+      .filter((candidate) => !isExcludedSender(candidate.from))
+      .map((candidate) => ({
+        ...candidate,
+        signals: receiptSignals(candidateText(candidate))
+      }))
+      .filter((candidate) => candidate.signals.length > 0);
     const matchedSignals = unique(receiptCandidates.flatMap((candidate) => candidate.signals));
 
     // Fetch full body for each receipt candidate and create receipt records
@@ -928,7 +931,7 @@ async function syncProviderForUser(
       receipts: importedReceipts,
       message: importedReceipts.length > 0
         ? `Imported ${importedReceipts.length} receipt${importedReceipts.length === 1 ? "" : "s"} from ${candidates.length} scanned messages.`
-        : `Scanned ${candidates.length} messages, found ${receiptCandidates.length} receipt candidate${receiptCandidates.length === 1 ? "" : "s"}, but none were new.`
+        : `Scanned ${candidates.length} messages; none matched receipt signals strongly enough to import.`
     };
   } catch (error) {
     return syncError(providerId, syncedAt, error instanceof Error ? error.message : "sync_failed");
@@ -1355,7 +1358,7 @@ async function connectorCandidate(request: Request): Promise<Response> {
     .join(" ")
     .toLowerCase();
 
-  const signals = receiptSignals(text);
+  const signals = isExcludedSender(body.from) ? [] : receiptSignals(text);
   const shouldInspect = signals.length > 0;
   return json({
     ok: true,
@@ -1385,13 +1388,29 @@ function receiptSignals(text: string): string[] {
     ["invoice", /\binvoice\b/],
     ["purchase", /\bpurchase\b|\bpurchase confirmation\b/],
     ["shipped", /\bshipped\b|\bdelivered\b/],
-    ["return", /\breturn\b|\breturn window\b/],
-    ["warranty", /\bwarranty\b|\bprotection plan\b/],
+    // "return" alone is far too broad (matches "return to sender", "returning customer", etc.)
+    // — require purchase-return context.
+    ["return", /\breturn window\b|\bdays? to return\b|\breturn eligible\b|\bfree returns?\b/],
+    // Bare "warranty" matches Google Play / device setup emails — require product-warranty context.
+    ["warranty", /\b(?:extended|limited|manufacturer'?s?|\d+[\s-]?(?:year|yr|month))\s+warranty\b|\bwarranty\s+(?:card|period|coverage|registration|information|claim)\b|\bprotection plan\b/],
     ["merchant", /\bamazon\b|\bwalmart\b|\btarget\b|\bcostco\b|\bbest buy\b|\bhome depot\b|\blowe'?s\b|\bapple\b|\bstaples\b/]
   ];
   return patterns
     .filter(([, pattern]) => pattern.test(text))
     .map(([label]) => label);
+}
+
+// Google system / Play Store senders are not merchant receipts even when they
+// mention "order", "receipt", or "warranty" (account notices, Play setup emails, etc.).
+function isExcludedSender(from: string | undefined): boolean {
+  if (!from) return false;
+  const sender = from.toLowerCase();
+  return (
+    sender.includes("@google.com") ||
+    sender.includes("noreply@google.com") ||
+    sender.includes("no-reply@accounts.google.com") ||
+    sender.includes("googleplay")
+  );
 }
 
 async function categorizeReceipt(request: Request, env: Env): Promise<Response> {
