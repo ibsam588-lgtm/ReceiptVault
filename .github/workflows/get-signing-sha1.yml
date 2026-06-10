@@ -44,7 +44,6 @@ jobs:
           print(f"Edit ID: {edit_id}")
 
           try:
-              # List bundles within the edit context
               bundles = service.edits().bundles().list(packageName=pkg, editId=edit_id).execute()
               bundles_list = bundles.get('bundles', [])
               print(f"Total bundles found: {len(bundles_list)}")
@@ -56,18 +55,47 @@ jobs:
                   latest_vc = max(b['versionCode'] for b in bundles_list)
               print(f"Using version code: {latest_vc}")
 
-              # Get generated APKs (top-level resource, no edit needed)
               try:
                   gen_apks = service.generatedapks().list(
                       packageName=pkg, versionCode=latest_vc
                   ).execute()
                   gen_list = gen_apks.get('generatedApks', [])
-                  print(f"Generated APKs count: {len(gen_list)}")
-                  if gen_list:
-                      print(f"First APK info: {json.dumps(gen_list[0], indent=2)}")
+                  print(f"Generated APKs per signing key: {len(gen_list)}")
 
-                  if gen_list:
-                      dl_id = gen_list[0]['downloadId']
+                  for idx, apk_per_key in enumerate(gen_list):
+                      print(f"\n--- Signing key entry {idx} ---")
+                      print(f"Keys present: {list(apk_per_key.keys())}")
+
+                      # SHA-256 is available directly — Firebase accepts this
+                      cert_sha256 = apk_per_key.get('certificateSha256Hash')
+                      if cert_sha256:
+                          print(f"\n=== PLAY APP SIGNING SHA-256 (add to Firebase) ===")
+                          print(f"SHA-256: {cert_sha256}")
+                          print("===================================================")
+
+                      # Find a downloadId from any available APK type
+                      dl_id = None
+                      dl_source = None
+
+                      universal = apk_per_key.get('generatedUniversalApk', {})
+                      if isinstance(universal, dict) and 'downloadId' in universal:
+                          dl_id = universal['downloadId']
+                          dl_source = 'generatedUniversalApk'
+
+                      if not dl_id:
+                          for field in ('generatedSplitApks', 'unprotectedGeneratedSplitApks'):
+                              splits = apk_per_key.get(field, [])
+                              if splits and isinstance(splits[0], dict) and 'downloadId' in splits[0]:
+                                  dl_id = splits[0]['downloadId']
+                                  dl_source = field
+                                  break
+
+                      if not dl_id:
+                          print("No downloadId found in this entry. Full structure (truncated):")
+                          print(json.dumps(apk_per_key, indent=2)[:3000])
+                          continue
+
+                      print(f"Using downloadId from {dl_source}: {dl_id}")
                       url = (
                           f'https://androidpublisher.googleapis.com'
                           f'/androidpublisher/v3/applications/{pkg}'
@@ -82,9 +110,8 @@ jobs:
                           for chunk in resp.iter_content(1024 * 1024):
                               f.write(chunk)
                           apk_path = f.name
-                      print(f"Downloaded APK ({os.path.getsize(apk_path)} bytes)")
+                      print(f"Downloaded APK: {os.path.getsize(apk_path)} bytes")
 
-                      # Extract signing cert from APK
                       with zipfile.ZipFile(apk_path) as z:
                           cert_names = [
                               n for n in z.namelist()
@@ -96,22 +123,14 @@ jobs:
                               with open('/tmp/signing.rsa', 'wb') as cf:
                                   cf.write(cert_data)
 
-                              # Extract PEM cert from PKCS7
                               r1 = subprocess.run(
                                   ['openssl', 'pkcs7', '-inform', 'DER', '-in', '/tmp/signing.rsa',
                                    '-out', '/tmp/signing.pem', '-print_certs'],
                                   capture_output=True, text=True
                               )
                               if r1.returncode != 0:
-                                  print(f"openssl error: {r1.stderr}")
-                                  # Try alternative: extract raw cert
-                                  r1b = subprocess.run(
-                                      ['openssl', 'smime', '-verify', '-noverify', '-inform', 'DER',
-                                       '-in', '/tmp/signing.rsa', '-signer', '/tmp/signing.pem'],
-                                      capture_output=True, text=True
-                                  )
-                              
-                              # Get SHA-1 fingerprint
+                                  print(f"pkcs7 error: {r1.stderr}")
+
                               r2 = subprocess.run(
                                   ['openssl', 'x509', '-noout', '-fingerprint', '-sha1',
                                    '-in', '/tmp/signing.pem'],
@@ -125,11 +144,11 @@ jobs:
                                   print(f"\nSHA-1 (for Firebase, with colons): {sha1}")
                                   print(f"SHA-1 (no colons, lowercase): {sha1.replace(':', '').lower()}")
                               print("==========================================")
-                  else:
-                      print("No generated APKs found for version code", latest_vc)
+                          break  # one signing key is enough
+
               except Exception as e:
                   import traceback
-                  print(f"Error getting generated APKs: {e}")
+                  print(f"Error: {e}")
                   traceback.print_exc()
           finally:
               service.edits().delete(packageName=pkg, editId=edit_id).execute()
