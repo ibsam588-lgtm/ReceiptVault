@@ -1898,6 +1898,12 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 val summary = connectorClient.syncProvider(account.provider)
+                // Upsert any receipts returned by the Worker into local storage
+                for (receiptJson in summary.receipts) {
+                    runCatching {
+                        _receipts.value = store.upsert(Receipt.fromJson(receiptJson))
+                    }
+                }
                 val result = connectorStore.markSyncReady(
                     id = id,
                     scanned = summary.scanned,

@@ -115,6 +115,7 @@ type ConnectorSyncReport = {
   imported: number;
   matchedSignals: string[];
   message: string;
+  receipts?: Record<string, unknown>[];
   error?: string;
 };
 
@@ -883,16 +884,50 @@ async function syncProviderForUser(
     })).filter((candidate) => candidate.signals.length > 0);
     const matchedSignals = unique(receiptCandidates.flatMap((candidate) => candidate.signals));
 
+    // Fetch full body for each receipt candidate and create receipt records
+    const importedReceipts: Record<string, unknown>[] = [];
+    for (const candidate of receiptCandidates) {
+      // Use provider-prefixed message ID as receipt ID so duplicate syncs overwrite instead of duplicate
+      const receiptId = `${providerId}-${candidate.id}`;
+      const bodyText = providerId === "gmail"
+        ? await fetchGmailMessageFullText(refreshed.access_token as string, candidate.id)
+        : candidate.snippet || "";
+      const purchasedAtMs = candidate.date ? Date.parse(candidate.date) : Date.now();
+      const receipt: Record<string, unknown> = {
+        id: receiptId,
+        merchant: extractMerchant(candidate.from || ""),
+        amountCents: extractAmountCents(`${candidate.subject || ""} ${bodyText}`),
+        purchasedAtMillis: Number.isNaN(purchasedAtMs) ? Date.now() : purchasedAtMs,
+        category: "Uncategorized",
+        location: "Location not detected",
+        returnByMillis: null,
+        warrantyUntilMillis: null,
+        notes: `Imported from ${candidate.from || "email"} — ${candidate.subject || "no subject"}`,
+        rawText: `${candidate.subject || ""}\n${bodyText}`.slice(0, 2000),
+        imagePath: "",
+        source: "EmailShare"
+      };
+      await env.RECEIPTS_BUCKET.put(
+        `users/${userId}/receipts/${receiptId}/metadata.json`,
+        JSON.stringify(receipt),
+        { httpMetadata: { contentType: "application/json" } }
+      );
+      importedReceipts.push(receipt);
+    }
+
     return {
       ok: true,
       provider: providerId,
-      status: "candidate_scan_complete",
+      status: "import_complete",
       syncedAt,
       scanned: candidates.length,
       candidates: receiptCandidates.length,
-      imported: 0,
+      imported: importedReceipts.length,
       matchedSignals,
-      message: `Scanned ${candidates.length} receipt-query messages and found ${receiptCandidates.length} likely receipt/order candidates. Body/attachment import remains gated to candidates only.`
+      receipts: importedReceipts,
+      message: importedReceipts.length > 0
+        ? `Imported ${importedReceipts.length} receipt${importedReceipts.length === 1 ? "" : "s"} from ${candidates.length} scanned messages.`
+        : `Scanned ${candidates.length} messages, found ${receiptCandidates.length} receipt candidate${receiptCandidates.length === 1 ? "" : "s"}, but none were new.`
     };
   } catch (error) {
     return syncError(providerId, syncedAt, error instanceof Error ? error.message : "sync_failed");
@@ -1013,6 +1048,76 @@ async function fetchGmailCandidates(
   }
 
   return candidates;
+}
+
+async function fetchGmailMessageFullText(accessToken: string, messageId: string): Promise<string> {
+  const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`);
+  url.searchParams.set("format", "full");
+  const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) return "";
+  const message = await response.json<Record<string, unknown>>().catch(() => ({}));
+  const payload = isRecord(message.payload) ? message.payload : {};
+  return extractPartsText(payload).slice(0, 4000);
+}
+
+function extractPartsText(part: Record<string, unknown>): string {
+  const mimeType = typeof part.mimeType === "string" ? part.mimeType : "";
+  const body = isRecord(part.body) ? part.body : {};
+  const data = typeof body.data === "string" ? body.data : "";
+  if (data && mimeType.startsWith("text/")) {
+    const decoded = new TextDecoder().decode(base64UrlDecode(data));
+    return mimeType === "text/html" ? stripHtml(decoded) : decoded;
+  }
+  const parts = Array.isArray(part.parts) ? part.parts.filter(isRecord) : [];
+  return parts.map(extractPartsText).filter(Boolean).join("\n");
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function extractMerchant(from: string): string {
+  // "Amazon.com <auto-confirm@amazon.com>" → "Amazon.com"
+  const nameMatch = from.match(/^"?([^"<]+?)"?\s*</);
+  if (nameMatch) return nameMatch[1].trim();
+  // "no-reply@bestbuy.com" → "Bestbuy"
+  const domainMatch = from.match(/@([^.@]+)\./);
+  if (domainMatch) {
+    const d = domainMatch[1];
+    return d.charAt(0).toUpperCase() + d.slice(1);
+  }
+  return from.trim() || "Unknown store";
+}
+
+function extractAmountCents(text: string): number {
+  const amounts: number[] = [];
+  const patterns = [
+    /\$\s*([0-9]{1,4}(?:,[0-9]{3})*\.[0-9]{2})/g,
+    /USD\s*([0-9]{1,4}(?:,[0-9]{3})*\.[0-9]{2})/gi,
+    /total[^$\d]{0,20}\$?\s*([0-9]{1,4}(?:,[0-9]{3})*\.[0-9]{2})/gi,
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const value = parseFloat(match[1].replace(/,/g, ""));
+      if (!Number.isNaN(value) && value > 0) amounts.push(Math.round(value * 100));
+    }
+  }
+  if (amounts.length === 0) return 0;
+  // Prefer largest amount ≤ $10,000 (likely the order total, not a line item)
+  const valid = amounts.filter((a) => a <= 1000000);
+  return valid.length > 0 ? Math.max(...valid) : 0;
 }
 
 function gmailHeaders(detail: Record<string, unknown>): Record<string, string> {

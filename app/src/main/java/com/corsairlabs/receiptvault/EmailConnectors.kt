@@ -105,7 +105,8 @@ data class ConnectorSyncSummary(
     val scanned: Int,
     val candidates: Int,
     val imported: Int,
-    val message: String
+    val message: String,
+    val receipts: List<org.json.JSONObject> = emptyList()
 )
 
 class EmailConnectorStore(private val context: Context) {

@@ -141,11 +141,20 @@ class EmailConnectorClient {
 
         val reports = JSONObject(response).optJSONArray("reports")
         val report = reports?.optJSONObject(0)
+        val receiptsArray = report?.optJSONArray("receipts")
+        val receiptsList = buildList {
+            if (receiptsArray != null) {
+                for (i in 0 until receiptsArray.length()) {
+                    runCatching { add(receiptsArray.getJSONObject(i)) }
+                }
+            }
+        }
         ConnectorSyncSummary(
             scanned = report?.optInt("scanned", 0) ?: 0,
             candidates = report?.optInt("candidates", 0) ?: 0,
             imported = report?.optInt("imported", 0) ?: 0,
-            message = report?.optString("message", "Receipt-only sync check completed.") ?: "Receipt-only sync check completed."
+            message = report?.optString("message", "Receipt-only sync check completed.") ?: "Receipt-only sync check completed.",
+            receipts = receiptsList
         )
     }
 
