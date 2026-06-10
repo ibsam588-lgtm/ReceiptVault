@@ -99,7 +99,7 @@ jobs:
                       url = (
                           f'https://androidpublisher.googleapis.com'
                           f'/androidpublisher/v3/applications/{pkg}'
-                          f'/generatedApks/{latest_vc}/downloads/{dl_id}/download'
+                          f'/generatedApks/{latest_vc}/downloads/{dl_id}:download?alt=media'
                       )
                       print(f"Downloading APK...")
                       headers = {'Authorization': f'Bearer {creds.token}'}
