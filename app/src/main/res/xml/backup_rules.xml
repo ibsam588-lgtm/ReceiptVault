@@ -1,4 +1,7 @@
 <full-backup-content>
+    <!-- Include receipt images and general app data -->
     <include domain="file" path="receipts/" />
-    <include domain="sharedpref" path="." />
+    <include domain="sharedpref" path="receiptvault.xml" />
+    <!-- S3: exclude billing prefs — entitlement state must come from Google Play, not device backup -->
+    <exclude domain="sharedpref" path="receiptvault_billing.xml" />
 </full-backup-content>

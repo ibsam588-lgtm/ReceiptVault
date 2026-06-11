@@ -87,7 +87,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -105,6 +104,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
@@ -193,7 +194,6 @@ private fun ReceiptVaultRoot(
     onSharedUrisConsumed: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val viewModel: ReceiptVaultViewModel = viewModel(
         factory = ReceiptVaultViewModel.factory(context.applicationContext as Application)
     )
@@ -226,34 +226,48 @@ private fun ReceiptVaultRoot(
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
         if (saved) {
             cameraUri?.let { uri ->
-                scope.launch {
-                    viewModel.importReceipt(uri, ImportSource.Camera)
-                    screen = AppScreen.Detail
-                }
+                // B3: use viewModelScope so import survives rotation; B4: only navigate on success
+                viewModel.launchImport(uri, ImportSource.Camera) { screen = AppScreen.Detail }
             }
         }
     }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
-            scope.launch {
-                viewModel.importReceipt(uri, ImportSource.Image)
-                screen = AppScreen.Detail
-            }
+            viewModel.launchImport(uri, ImportSource.Image) { screen = AppScreen.Detail }
         }
     }
 
+    // B1: launchSharedImport deduplicates URIs in the ViewModel so rotation doesn't re-import
     LaunchedEffect(sharedUris, authUser) {
         if (sharedUris.isNotEmpty() && authUser != null) {
-            sharedUris.forEach { uri ->
-                viewModel.importReceipt(uri, ImportSource.EmailShare)
+            viewModel.launchSharedImport(sharedUris) {
+                screen = AppScreen.Detail
+                onSharedUrisConsumed()
             }
-            screen = AppScreen.Detail
-            onSharedUrisConsumed()
         }
     }
 
+    var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
+
     ReceiptVaultTheme {
+        if (showDeleteAccountDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteAccountDialog = false },
+                title = { Text("Delete account?") },
+                text = { Text("All receipts and account data will be permanently deleted. This cannot be undone.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeleteAccountDialog = false
+                        viewModel.deleteAccount()
+                    }) { Text("Delete", color = Coral) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteAccountDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
+
         if (authUser == null) {
             AuthScreen(
                 isBusy = authBusy,
@@ -286,7 +300,8 @@ private fun ReceiptVaultRoot(
                     googleSignInClient.signOut()
                     viewModel.signOut()
                     screen = AppScreen.Home
-                }
+                },
+                onDeleteAccount = { showDeleteAccountDialog = true }
             )
         }
     }
@@ -300,7 +315,8 @@ private fun ReceiptVaultApp(
     onScreenChange: (AppScreen) -> Unit,
     onScan: () -> Unit,
     onPickImage: () -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit = {}
 ) {
     val receipts by viewModel.receipts.collectAsState()
     val emailAccounts by viewModel.emailAccounts.collectAsState()
@@ -311,10 +327,13 @@ private fun ReceiptVaultApp(
     val pendingExternalUrl by viewModel.pendingExternalUrl.collectAsState()
     val context = LocalContext.current
 
+    // B5: wrap in try/catch — ActivityNotFoundException if no browser is installed
     LaunchedEffect(pendingExternalUrl) {
         val url = pendingExternalUrl
         if (!url.isNullOrBlank()) {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            try {
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (_: Exception) { }
             viewModel.clearPendingExternalUrl()
         }
     }
@@ -326,7 +345,8 @@ private fun ReceiptVaultApp(
                 currentScreen = currentScreen,
                 authUser = authUser,
                 onBack = { onScreenChange(AppScreen.Home) },
-                onSignOut = onSignOut
+                onSignOut = onSignOut,
+                onDeleteAccount = onDeleteAccount
             )
         },
         bottomBar = {
@@ -393,7 +413,8 @@ private fun ReceiptVaultApp(
                     onConnectImap = viewModel::connectManualImap,
                     onSync = viewModel::syncEmailAccount,
                     onDisconnect = viewModel::disconnectEmailAccount,
-                    onDeleteData = viewModel::deleteEmailAccountData
+                    onDeleteData = viewModel::deleteEmailAccountData,
+                    onPlusScreen = { onScreenChange(AppScreen.Plus) }
                 )
                 AppScreen.Plus -> PlusScreen(
                     billingState = billingState,
@@ -522,7 +543,8 @@ private fun AppTopBar(
     currentScreen: AppScreen,
     authUser: ReceiptVaultAuthUser?,
     onBack: () -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit = {}
 ) {
     TopAppBar(
         modifier = Modifier.windowInsetsPadding(WindowInsets.statusBars),
@@ -549,6 +571,10 @@ private fun AppTopBar(
         },
         actions = {
             if (currentScreen == AppScreen.Home) {
+                // P3: in-app account deletion required by Play Store policy
+                TextButton(onClick = onDeleteAccount) {
+                    Text("Delete account", color = Coral, style = MaterialTheme.typography.labelSmall)
+                }
                 TextButton(onClick = onSignOut) {
                     Text("Sign out")
                 }
@@ -568,6 +594,14 @@ private fun HomeScreen(
     onWarranties: () -> Unit
 ) {
     val total = receipts.sumOf { it.amountCents }
+    // B16: filter to current calendar month so "This month" is accurate
+    val thisMonthTotal = run {
+        val now = LocalDate.now()
+        receipts.filter {
+            val d = Instant.ofEpochMilli(it.purchasedAtMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+            d.year == now.year && d.monthValue == now.monthValue
+        }.sumOf { it.amountCents }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
@@ -611,7 +645,7 @@ private fun HomeScreen(
                 StatCard(
                     modifier = Modifier.weight(1f),
                     label = "This month",
-                    value = formatCurrency(total),
+                    value = formatCurrency(thisMonthTotal),
                     accent = Coral
                 )
             }
@@ -825,7 +859,8 @@ private fun EmailConnectorsScreen(
     onConnectImap: (String, String, String, String, String, Boolean) -> Unit,
     onSync: (String) -> Unit,
     onDisconnect: (String) -> Unit,
-    onDeleteData: (String) -> Unit
+    onDeleteData: (String) -> Unit,
+    onPlusScreen: () -> Unit = {}
 ) {
     var imapEmail by rememberSaveable { mutableStateOf("") }
     var imapHost by rememberSaveable { mutableStateOf("") }
@@ -865,7 +900,7 @@ private fun EmailConnectorsScreen(
         }
 
         item {
-            SectionHeader("Connect accounts", "Plan limits", {})
+            SectionHeader("Connect accounts", "Plan limits", onPlusScreen)
         }
 
         item {
@@ -905,7 +940,7 @@ private fun EmailConnectorsScreen(
         }
 
         item {
-            SectionHeader("Connected accounts", "Delete data", {})
+            SectionHeader("Connected accounts", "", {})
         }
 
         if (accounts.isEmpty()) {
@@ -947,6 +982,11 @@ private fun MailboxConsentCard(checked: Boolean, onCheckedChange: (Boolean) -> U
                 Text("Mailbox access consent", fontWeight = FontWeight.ExtraBold)
                 Text(
                     "ReceiptVault searches connected mailboxes only for receipts, orders, invoices, returns, and warranty records. Non-receipt messages are discarded and never stored.",
+                    color = Muted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "Extracted receipt text may be sent to an AI service to identify the merchant, amount, and category. No email body content is stored or transmitted.",
                     color = Muted,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1157,6 +1197,13 @@ private fun PlusScreen(
     onPurchase: (Activity, ReceiptVaultBillingProduct) -> Unit
 ) {
     val activity = LocalContext.current.findActivity()
+    // P5: use live prices from billing; fall back to fallback prices when not yet loaded
+    val monthlyPrice = billingState.offers
+        .firstOrNull { it.product == ReceiptVaultBillingProduct.PlusMonthly }
+        ?.displayPrice ?: ReceiptVaultBillingProduct.PlusMonthly.fallbackPrice
+    val yearlyPrice = billingState.offers
+        .firstOrNull { it.product == ReceiptVaultBillingProduct.PlusYearly }
+        ?.displayPrice ?: ReceiptVaultBillingProduct.PlusYearly.fallbackPrice
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1175,9 +1222,9 @@ private fun PlusScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text("ReceiptVault Plus", color = Color.White.copy(alpha = 0.78f))
-                    Text("${'$'}4.99", color = Color.White, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
+                    Text(monthlyPrice, color = Color.White, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.ExtraBold)
                     Text("per month", color = Color.White.copy(alpha = 0.78f))
-                    Text("${'$'}47.99 yearly", color = Color.White.copy(alpha = 0.78f), style = MaterialTheme.typography.bodySmall)
+                    Text("$yearlyPrice yearly", color = Color.White.copy(alpha = 0.78f), style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -1230,11 +1277,6 @@ private fun BillingOfferCard(
                 )
             }
             Text(offer.product.description, color = Muted, style = MaterialTheme.typography.bodySmall)
-            Text(
-                "Product ID: ${offer.product.productId}",
-                color = Muted,
-                style = MaterialTheme.typography.labelSmall
-            )
             Button(
                 onClick = onPurchase,
                 enabled = canLaunchPurchase,
@@ -1293,16 +1335,26 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete:
             val emailUrl = receipt.emailUrl
             if (!emailUrl.isNullOrBlank()) {
                 val context = LocalContext.current
+                // X8: determine label from URL rather than hardcoding "Gmail"
+                val emailAppLabel = when {
+                    emailUrl.contains("mail.google.com") -> "Opens in Gmail"
+                    emailUrl.contains("outlook") || emailUrl.contains("live.com") -> "Opens in Outlook"
+                    emailUrl.contains("yahoo.com") -> "Opens in Yahoo Mail"
+                    else -> "Opens in email app"
+                }
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            context.startActivity(
-                                android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(emailUrl)
+                            // B5: guard against ActivityNotFoundException (no email app installed)
+                            try {
+                                context.startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse(emailUrl)
+                                    )
                                 )
-                            )
+                            } catch (_: Exception) { }
                         },
                     shape = RoundedCornerShape(8.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White)
@@ -1315,7 +1367,7 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete:
                         Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
                         Column(Modifier.weight(1f)) {
                             Text("View original email", fontWeight = FontWeight.Bold)
-                            Text("Opens in Gmail", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            Text(emailAppLabel, color = Muted, style = MaterialTheme.typography.bodySmall)
                         }
                         Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Muted)
                     }
@@ -1609,7 +1661,9 @@ private fun SectionHeader(title: String, action: String, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(title, fontWeight = FontWeight.ExtraBold)
-        TextButton(onClick = onClick) { Text(action, color = TealDark) }
+        if (action.isNotBlank()) {
+            TextButton(onClick = onClick) { Text(action, color = TealDark) }
+        }
     }
 }
 
@@ -1712,13 +1766,18 @@ private fun MerchantMark(merchant: String) {
 
 @Composable
 private fun ReceiptImage(path: String) {
-    val image = remember(path) {
-        runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+    // X4: decode JPEG on IO thread to avoid main-thread ANR on large images
+    var image by remember(path) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    LaunchedEffect(path) {
+        image = withContext(Dispatchers.IO) {
+            runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+        }
     }
     Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
-        if (image != null) {
+        val bmp = image
+        if (bmp != null) {
             Image(
-                bitmap = image,
+                bitmap = bmp,
                 contentDescription = "Saved receipt image",
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1777,10 +1836,14 @@ private fun EmptySearchState() {
 
 @Composable
 private fun BusyOverlay() {
+    // X3: pointerInput consumes all touch events so the UI underneath is not interactive
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White.copy(alpha = 0.78f)),
+            .background(Color.White.copy(alpha = 0.78f))
+            .pointerInput(Unit) {
+                awaitPointerEventScope { while (true) { awaitPointerEvent() } }
+            },
         contentAlignment = Alignment.Center
     ) {
         Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
@@ -1894,10 +1957,11 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         _authUser.value = firebaseAuth.currentUser?.toReceiptVaultAuthUser()
     }
 
-    private val _receipts = MutableStateFlow(store.loadReceipts())
+    // B12: initialise with empty lists; load from SharedPreferences on the IO thread in init
+    private val _receipts = MutableStateFlow<List<Receipt>>(emptyList())
     val receipts: StateFlow<List<Receipt>> = _receipts
 
-    private val _emailAccounts = MutableStateFlow(connectorStore.loadAccounts())
+    private val _emailAccounts = MutableStateFlow<List<EmailConnectorAccount>>(emptyList())
     val emailAccounts: StateFlow<List<EmailConnectorAccount>> = _emailAccounts
 
     private val _activePlan = MutableStateFlow(connectorStore.currentPlan())
@@ -1926,6 +1990,11 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 _activePlan.value = connectorStore.currentPlan()
                 updateBackgroundSyncSchedule()
             }
+        }
+        // B12: load persisted data on IO thread to avoid blocking the main thread at startup
+        viewModelScope.launch {
+            _receipts.value = withContext(Dispatchers.IO) { store.loadReceipts() }
+            _emailAccounts.value = withContext(Dispatchers.IO) { connectorStore.loadAccounts() }
         }
     }
 
@@ -2029,12 +2098,13 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         _isBusy.value = true
         return try {
             val id = UUID.randomUUID().toString()
-            // Enhance image: crop to bill area + high-contrast grayscale for better OCR
+            // Enhance image only for OCR; X2: save the original colour photo for the vault
             val enhanced = imageEnhancer.enhance(uri)
             val rawText = ocrScanner.readText(enhanced)
+            enhanced.recycle()  // done with enhanced — original is saved below
             val localDraft = parser.parse(rawText)
             val draft = parser.mergeWithAi(localDraft, aiClient.categorize(rawText, source))
-            val imagePath = store.saveImageBitmap(enhanced, id)
+            val imagePath = store.saveImage(uri, id)
             val receipt = Receipt(
                 id = id,
                 merchant = draft.merchant,
@@ -2061,6 +2131,51 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
             null
         } finally {
             _isBusy.value = false
+        }
+    }
+
+    // B3/B4: launch import in viewModelScope so it survives rotation;
+    // navigate only when the receipt is successfully parsed (non-null result)
+    fun launchImport(uri: Uri, source: ImportSource, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val result = importReceipt(uri, source)
+            if (result != null) onSuccess()
+        }
+    }
+
+    // B1: track which shared URIs were already imported so rotation doesn't re-import them
+    private val consumedSharedUris = mutableSetOf<String>()
+
+    fun launchSharedImport(uris: List<Uri>, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            val newUris = uris.filter { consumedSharedUris.add(it.toString()) }
+            if (newUris.isNotEmpty()) {
+                newUris.forEach { importReceipt(it, ImportSource.EmailShare) }
+                onComplete()
+            }
+        }
+    }
+
+    // P3: in-app account deletion; Firebase AuthStateListener clears _authUser automatically
+    fun deleteAccount() {
+        val user = auth.currentUser ?: return
+        _authBusy.value = true
+        viewModelScope.launch {
+            try {
+                user.delete().authAwait()
+                withContext(Dispatchers.IO) { store.clearAll() }
+                _receipts.value = emptyList()
+                _emailAccounts.value = emptyList()
+            } catch (e: Exception) {
+                val isReauthRequired = e.message?.contains("requires-recent-login") == true
+                _message.value = if (isReauthRequired) {
+                    "Please sign out and sign back in, then try deleting your account again."
+                } else {
+                    "Could not delete account: ${e.message}"
+                }
+            } finally {
+                _authBusy.value = false
+            }
         }
     }
 
@@ -2290,16 +2405,24 @@ private fun authErrorMessage(error: Exception): String {
 internal class ReceiptStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("receiptvault", Context.MODE_PRIVATE)
 
+    // B6: wrap entire parse in try/catch so a corrupt prefs string doesn't crash at launch
     fun loadReceipts(): List<Receipt> {
         val raw = prefs.getString("receipts", "[]") ?: "[]"
-        val array = JSONArray(raw)
-        return buildList {
-            for (index in 0 until array.length()) {
-                add(Receipt.fromJson(array.getJSONObject(index)))
-            }
-        }.sortedByDescending { it.purchasedAtMillis }
+        return try {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    // skip individual entries that fail to parse rather than crashing
+                    runCatching { add(Receipt.fromJson(array.getJSONObject(index))) }
+                }
+            }.sortedByDescending { it.purchasedAtMillis }
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
+    // B7: @Synchronized prevents concurrent writes from UI thread and EmailSyncWorker
+    @Synchronized
     fun upsert(receipt: Receipt): List<Receipt> {
         val updated = (loadReceipts().filterNot { it.id == receipt.id } + receipt)
             .sortedByDescending { it.purchasedAtMillis }
@@ -2307,11 +2430,17 @@ internal class ReceiptStore(private val context: Context) {
         return updated
     }
 
+    @Synchronized
     fun delete(id: String): List<Receipt> {
         val updated = loadReceipts().filterNot { it.id == id }
             .sortedByDescending { it.purchasedAtMillis }
         prefs.edit().putString("receipts", JSONArray(updated.map { it.toJson() }).toString()).apply()
         return updated
+    }
+
+    // P3: wipe all local data when user deletes their account
+    fun clearAll() {
+        prefs.edit().clear().apply()
     }
 
     suspend fun saveImage(uri: Uri, id: String): String = withContext(Dispatchers.IO) {
@@ -2371,9 +2500,12 @@ private class ImageEnhancer(private val context: Context) {
 
     suspend fun enhance(uri: Uri): Bitmap = withContext(Dispatchers.Default) {
         val original = decodeUri(uri)
-        original
-            .let { toHighContrastGray(it) }
-            .let { autoCrop(it) }
+        val gray = toHighContrastGray(original)
+        // B9: recycle intermediate bitmaps to avoid OOM on large receipt photos
+        original.recycle()
+        val cropped = autoCrop(gray)
+        if (cropped !== gray) gray.recycle()
+        cropped
     }
 
     private fun decodeUri(uri: Uri): Bitmap {
@@ -2462,9 +2594,15 @@ private class ImageEnhancer(private val context: Context) {
         var left = 0; while (left < w - 1 && !colHasContent(left)) left++
         var right = w - 1; while (right > left && !colHasContent(right)) right--
 
+        // B2: if the detected content area is suspiciously small (< 10 % of image),
+        // no reliable bill region was found — return the original unmodified bitmap
+        val rawCropW = right - left
+        val rawCropH = bottom - top
+        if (rawCropW < w * 0.10f || rawCropH < h * 0.10f) return bitmap
+
         // Add 3 % padding so we never clip the document edge
-        val padX = ((right - left) * 0.03f).toInt().coerceAtLeast(4)
-        val padY = ((bottom - top) * 0.03f).toInt().coerceAtLeast(4)
+        val padX = (rawCropW * 0.03f).toInt().coerceAtLeast(4)
+        val padY = (rawCropH * 0.03f).toInt().coerceAtLeast(4)
         left = (left - padX).coerceAtLeast(0)
         top = (top - padY).coerceAtLeast(0)
         right = (right + padX).coerceAtMost(w - 1)
@@ -2687,7 +2825,8 @@ data class Receipt(
 
     companion object {
         fun fromJson(json: JSONObject): Receipt = Receipt(
-            id = json.getString("id"),
+            // B6: getString("id") throws if key is missing — use optString with UUID fallback
+            id = json.optString("id", "").ifBlank { UUID.randomUUID().toString() },
             merchant = json.optString("merchant", "Unknown store"),
             amountCents = json.optLong("amountCents", 0),
             purchasedAtMillis = json.optLong("purchasedAtMillis", todayMillis()),

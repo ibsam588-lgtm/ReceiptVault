@@ -221,6 +221,11 @@ class PlayBillingClient(private val context: Context) : PurchasesUpdatedListener
             .forEach { purchase ->
                 val productId = purchase.products.firstOrNull { it in billingProductIds() } ?: return@forEach
                 scope.launch {
+                    // B15: acknowledge BEFORE backend verification — Google auto-refunds after
+                    // 3 days if the purchase is not acknowledged, and the network call might not
+                    // complete if the app is closed immediately after purchase
+                    acknowledgePurchaseIfNeeded(purchase)
+
                     val verified = runCatching {
                         verifyPurchaseWithBackend(productId, purchase.purchaseToken)
                     }.getOrDefault(false)
@@ -237,7 +242,6 @@ class PlayBillingClient(private val context: Context) : PurchasesUpdatedListener
                     } else {
                         updateState(message = "Purchase completed, but server verification is not configured yet.")
                     }
-                    acknowledgePurchaseIfNeeded(purchase)
                 }
             }
 
