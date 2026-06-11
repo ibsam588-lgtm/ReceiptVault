@@ -5,7 +5,11 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -119,6 +123,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.text.NumberFormat
 import java.time.Instant
@@ -1871,6 +1876,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     private val connectorClient = EmailConnectorClient()
     private val playBillingClient = PlayBillingClient(application)
     private val ocrScanner = OcrScanner(application)
+    private val imageEnhancer = ImageEnhancer(application)
     private val aiClient = ReceiptAiClient(application)
     private val parser = ReceiptParser()
 
@@ -2022,10 +2028,12 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         _isBusy.value = true
         return try {
             val id = UUID.randomUUID().toString()
-            val rawText = ocrScanner.readText(uri)
+            // Enhance image: crop to bill area + high-contrast grayscale for better OCR
+            val enhanced = imageEnhancer.enhance(uri)
+            val rawText = ocrScanner.readText(enhanced)
             val localDraft = parser.parse(rawText)
             val draft = parser.mergeWithAi(localDraft, aiClient.categorize(rawText, source))
-            val imagePath = store.saveImage(uri, id)
+            val imagePath = store.saveImageBitmap(enhanced, id)
             val receipt = Receipt(
                 id = id,
                 merchant = draft.merchant,
@@ -2315,6 +2323,15 @@ internal class ReceiptStore(private val context: Context) {
         } ?: throw IOException("image file could not be opened")
         file.absolutePath
     }
+
+    suspend fun saveImageBitmap(bitmap: Bitmap, id: String): String = withContext(Dispatchers.IO) {
+        val dir = File(context.filesDir, "receipts").apply { mkdirs() }
+        val file = File(dir, "$id.jpg")
+        FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
+        }
+        file.absolutePath
+    }
 }
 
 private class OcrScanner(private val context: Context) {
@@ -2326,12 +2343,140 @@ private class OcrScanner(private val context: Context) {
         }
         return suspendCancellableCoroutine { continuation ->
             recognizer.process(image)
-                .addOnSuccessListener { text ->
-                    continuation.resume(text.text)
-                }
-                .addOnFailureListener { error ->
-                    continuation.resumeWithException(error)
-                }
+                .addOnSuccessListener { text -> continuation.resume(text.text) }
+                .addOnFailureListener { error -> continuation.resumeWithException(error) }
+        }
+    }
+
+    suspend fun readText(bitmap: Bitmap): String {
+        val image = InputImage.fromBitmap(bitmap, 0)
+        return suspendCancellableCoroutine { continuation ->
+            recognizer.process(image)
+                .addOnSuccessListener { text -> continuation.resume(text.text) }
+                .addOnFailureListener { error -> continuation.resumeWithException(error) }
+        }
+    }
+}
+
+/**
+ * Preprocesses an image before OCR by:
+ * 1. Down-sampling oversized images to prevent OOM.
+ * 2. Converting to grayscale with boosted contrast (2× factor) so text edges are sharp.
+ * 3. Auto-cropping: scans inward from each edge and trims rows/columns that are
+ *    almost entirely background (< 3 % non-white pixels). This removes large blank
+ *    borders from photos taken with a phone and keeps just the bill area.
+ */
+private class ImageEnhancer(private val context: Context) {
+
+    suspend fun enhance(uri: Uri): Bitmap = withContext(Dispatchers.Default) {
+        val original = decodeUri(uri)
+        original
+            .let { toHighContrastGray(it) }
+            .let { autoCrop(it) }
+    }
+
+    private fun decodeUri(uri: Uri): Bitmap {
+        // First pass: read dimensions only
+        val sizeOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, sizeOpts)
+        }
+        val maxDim = maxOf(sizeOpts.outWidth, sizeOpts.outHeight)
+        val sampleSize = when {
+            maxDim > 6000 -> 4
+            maxDim > 3000 -> 2
+            else -> 1
+        }
+        // Second pass: decode at reduced size
+        val decodeOpts = BitmapFactory.Options().apply {
+            inSampleSize = sampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, decodeOpts)
+        } ?: throw IOException("Cannot decode image")
+    }
+
+    /**
+     * Converts to grayscale and applies 2× contrast boost in one ColorMatrix pass.
+     * Highlights become brighter, shadows become darker — ideal for printed text.
+     */
+    private fun toHighContrastGray(src: Bitmap): Bitmap {
+        val dst = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(dst)
+
+        val gray = ColorMatrix().apply { setSaturation(0f) }
+
+        val factor = 2.0f
+        val translate = (-0.5f * factor + 0.5f) * 255f
+        val contrast = ColorMatrix(floatArrayOf(
+            factor, 0f, 0f, 0f, translate,
+            0f, factor, 0f, 0f, translate,
+            0f, 0f, factor, 0f, translate,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        gray.postConcat(contrast)
+
+        val paint = Paint().apply { colorFilter = ColorMatrixColorFilter(gray) }
+        canvas.drawBitmap(src, 0f, 0f, paint)
+        return dst
+    }
+
+    /**
+     * Finds the tightest bounding box that contains at least 3 % non-white pixels
+     * per row/column, then crops with a small safety margin.
+     * Only applies the crop when it removes more than 5 % of width or height
+     * (avoids useless crops on already-tight images).
+     */
+    private fun autoCrop(bitmap: Bitmap): Bitmap {
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val threshold = 200   // luminance below this → "content"
+        val minFraction = 0.03f  // row/col must have ≥ 3 % dark pixels to count as content
+
+        fun rowHasContent(y: Int): Boolean {
+            var dark = 0
+            for (x in 0 until w) {
+                val c = pixels[y * w + x]
+                // Average of R, G, B (already greyscale so all channels equal)
+                if (((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3 < threshold) dark++
+            }
+            return dark.toFloat() / w >= minFraction
+        }
+
+        fun colHasContent(x: Int): Boolean {
+            var dark = 0
+            for (y in 0 until h) {
+                val c = pixels[y * w + x]
+                if (((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3 < threshold) dark++
+            }
+            return dark.toFloat() / h >= minFraction
+        }
+
+        var top = 0; while (top < h - 1 && !rowHasContent(top)) top++
+        var bottom = h - 1; while (bottom > top && !rowHasContent(bottom)) bottom--
+        var left = 0; while (left < w - 1 && !colHasContent(left)) left++
+        var right = w - 1; while (right > left && !colHasContent(right)) right--
+
+        // Add 3 % padding so we never clip the document edge
+        val padX = ((right - left) * 0.03f).toInt().coerceAtLeast(4)
+        val padY = ((bottom - top) * 0.03f).toInt().coerceAtLeast(4)
+        left = (left - padX).coerceAtLeast(0)
+        top = (top - padY).coerceAtLeast(0)
+        right = (right + padX).coerceAtMost(w - 1)
+        bottom = (bottom + padY).coerceAtMost(h - 1)
+
+        val cropW = right - left
+        val cropH = bottom - top
+
+        // Only crop if we're actually trimming > 5 % from width or height
+        return if (cropW < w * 0.95f || cropH < h * 0.95f) {
+            Bitmap.createBitmap(bitmap, left, top, cropW, cropH)
+        } else {
+            bitmap
         }
     }
 }
