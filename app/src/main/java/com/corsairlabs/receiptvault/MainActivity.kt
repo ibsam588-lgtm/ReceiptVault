@@ -1833,11 +1833,35 @@ private fun MerchantMark(merchant: String) {
 
 @Composable
 private fun ReceiptImage(path: String) {
-    // X4: decode JPEG on IO thread to avoid main-thread ANR on large images
+    // X4: decode JPEG on IO thread to avoid main-thread ANR on large images.
+    // Also apply EXIF rotation so legacy files saved before the enhance-pipeline
+    // fix display correctly (upright) regardless of when they were imported.
     var image by remember(path) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     LaunchedEffect(path) {
         image = withContext(Dispatchers.IO) {
-            runCatching { BitmapFactory.decodeFile(path)?.asImageBitmap() }.getOrNull()
+            runCatching {
+                val raw = BitmapFactory.decodeFile(path) ?: return@runCatching null
+                val orientation = runCatching {
+                    android.media.ExifInterface(path).getAttributeInt(
+                        android.media.ExifInterface.TAG_ORIENTATION,
+                        android.media.ExifInterface.ORIENTATION_NORMAL
+                    )
+                }.getOrDefault(android.media.ExifInterface.ORIENTATION_NORMAL)
+                val degrees = when (orientation) {
+                    android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                    android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                    android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                    else -> 0f
+                }
+                if (degrees == 0f) {
+                    raw.asImageBitmap()
+                } else {
+                    val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
+                    val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+                    raw.recycle()
+                    rotated.asImageBitmap()
+                }
+            }.getOrNull()
         }
     }
     Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
@@ -2577,6 +2601,16 @@ private class ImageEnhancer(private val context: Context) {
     }
 
     private fun decodeUri(uri: Uri): Bitmap {
+        // Read EXIF orientation before decoding — camera photos are typically stored
+        // rotated 90° and BitmapFactory.decodeStream ignores EXIF, so autoCrop and
+        // high-contrast conversion would run on a sideways image without this step.
+        val orientation = context.contentResolver.openInputStream(uri)?.use { input ->
+            android.media.ExifInterface(input).getAttributeInt(
+                android.media.ExifInterface.TAG_ORIENTATION,
+                android.media.ExifInterface.ORIENTATION_NORMAL
+            )
+        } ?: android.media.ExifInterface.ORIENTATION_NORMAL
+
         // First pass: read dimensions only
         val sizeOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use {
@@ -2593,9 +2627,22 @@ private class ImageEnhancer(private val context: Context) {
             inSampleSize = sampleSize
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        return context.contentResolver.openInputStream(uri)?.use {
+        val raw = context.contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, decodeOpts)
         } ?: throw IOException("Cannot decode image")
+
+        // Apply EXIF rotation so the bitmap is always upright before enhancement
+        val degrees = when (orientation) {
+            android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+        if (degrees == 0f) return raw
+        val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
+        val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+        raw.recycle()
+        return rotated
     }
 
     /**
