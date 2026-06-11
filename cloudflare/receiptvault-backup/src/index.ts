@@ -577,7 +577,8 @@ async function finishConnectorOAuth(request: Request, env: Env): Promise<Respons
     return html(`Could not connect ${provider.label}: ${escapeHtml(tokenResponse.error)}`, 502);
   }
 
-  await storeConnectorToken(env, state.userId, provider, tokenResponse.tokens);
+  const emailAddress = await fetchConnectorEmailAddress(provider, tokenResponse.tokens);
+  await storeConnectorToken(env, state.userId, provider, tokenResponse.tokens, emailAddress);
   const returnLink = state.returnUrl ? `<p><a href="${escapeHtml(state.returnUrl)}">Return to ReceiptVault</a></p>` : "";
   return html(`<h1>${provider.label} connected</h1><p>ReceiptVault can now run receipt-only imports for this account.</p>${returnLink}`);
 }
@@ -745,23 +746,81 @@ async function storeConnectorToken(
   env: Env,
   userId: string,
   provider: OAuthProviderConfig,
-  tokens: Record<string, unknown>
+  tokens: Record<string, unknown>,
+  emailAddress?: string | null
 ): Promise<void> {
   if (!env.CONNECTOR_TOKEN_ENCRYPTION_KEY) throw new Error("missing encryption key");
   const tokenSet = tokenSetWithExpiry(tokens);
   const encrypted = await encryptJson(tokenSet, env.CONNECTOR_TOKEN_ENCRYPTION_KEY);
   const key = connectorTokenObjectName(userId, provider.id);
+  // Preserve a previously stored email address (e.g. on token refresh) when no new one is supplied.
+  const existingEmail = emailAddress ? null : (await readConnectorMetadata(env, userId, provider.id))?.emailAddress;
   await env.RECEIPTS_BUCKET.put(key, JSON.stringify({
     provider: provider.id,
     label: provider.label,
     scope: provider.scope,
     storedAt: new Date().toISOString(),
     expiresAt: tokenSet.expiresAt || null,
+    emailAddress: emailAddress || existingEmail || null,
     encrypted
   }), {
     httpMetadata: { contentType: "application/json" }
   });
   await indexConnectorUser(env, userId);
+}
+
+/**
+ * Best-effort lookup of the connected mailbox's email address right after the
+ * OAuth code exchange, so the connectors list can show "user@gmail.com" instead
+ * of a generic provider label. Never throws — the address is cosmetic and must
+ * not fail the OAuth flow.
+ */
+async function fetchConnectorEmailAddress(
+  provider: OAuthProviderConfig,
+  tokens: Record<string, unknown>
+): Promise<string | null> {
+  const accessToken = typeof tokens.access_token === "string" ? tokens.access_token : "";
+  try {
+    if (provider.id === "gmail" && accessToken) {
+      const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+        headers: { authorization: `Bearer ${accessToken}` }
+      });
+      if (response.ok) {
+        const body = await response.json<Record<string, unknown>>();
+        const email = normalizeEmail(body.emailAddress);
+        if (email) return email;
+      }
+    }
+
+    if (provider.id === "outlook" && accessToken) {
+      const response = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName", {
+        headers: { authorization: `Bearer ${accessToken}` }
+      });
+      if (response.ok) {
+        const body = await response.json<Record<string, unknown>>();
+        const email = normalizeEmail(body.mail) || normalizeEmail(body.userPrincipalName);
+        if (email) return email;
+      }
+    }
+
+    // Fallback for providers that return an OpenID Connect id_token (e.g. Yahoo
+    // when OpenID scopes are granted): read the email claim from the JWT payload.
+    const idToken = typeof tokens.id_token === "string" ? tokens.id_token : "";
+    return emailFromIdToken(idToken);
+  } catch {
+    return null;
+  }
+}
+
+function emailFromIdToken(idToken: string): string | null {
+  const parts = idToken.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1]))) as Record<string, unknown>;
+    return normalizeEmail(payload.email);
+  } catch {
+    return null;
+  }
 }
 
 function tokenSetWithExpiry(tokens: Record<string, unknown>): OAuthTokenSet {
