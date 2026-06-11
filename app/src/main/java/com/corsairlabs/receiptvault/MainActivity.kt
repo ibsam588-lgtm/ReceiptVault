@@ -42,6 +42,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
@@ -1283,6 +1284,39 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete:
             ReceiptImage(receipt.imagePath)
         }
         item {
+            val emailUrl = receipt.emailUrl
+            if (!emailUrl.isNullOrBlank()) {
+                val context = LocalContext.current
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            context.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(emailUrl)
+                                )
+                            )
+                        },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
+                        Column(Modifier.weight(1f)) {
+                            Text("View original email", fontWeight = FontWeight.Bold)
+                            Text("Opens in Gmail", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Muted)
+                    }
+                }
+            }
+        }
+        item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 DetailTile(Modifier.weight(1f), "Purchased", receipt.purchaseDateLabel, Icons.Default.DateRange)
                 DetailTile(Modifier.weight(1f), "Category", receipt.category, Icons.Default.Info)
@@ -2483,7 +2517,8 @@ data class Receipt(
     val notes: String,
     val rawText: String,
     val imagePath: String,
-    val source: ImportSource
+    val source: ImportSource,
+    val emailUrl: String? = null
 ) {
     val purchaseDateLabel: String get() = purchasedAtMillis.formatDate()
     val returnByLabel: String get() = returnByMillis?.formatDate() ?: "Not set"
@@ -2502,6 +2537,7 @@ data class Receipt(
         .put("rawText", rawText)
         .put("imagePath", imagePath)
         .put("source", source.name)
+        .put("emailUrl", emailUrl ?: "")
 
     companion object {
         fun fromJson(json: JSONObject): Receipt = Receipt(
@@ -2516,7 +2552,8 @@ data class Receipt(
             notes = json.optString("notes", ""),
             rawText = json.optString("rawText", ""),
             imagePath = json.optString("imagePath", ""),
-            source = runCatching { ImportSource.valueOf(json.optString("source", ImportSource.Image.name)) }.getOrDefault(ImportSource.Image)
+            source = runCatching { ImportSource.valueOf(json.optString("source", ImportSource.Image.name)) }.getOrDefault(ImportSource.Image),
+            emailUrl = json.optString("emailUrl", "").takeIf { it.isNotBlank() }
         )
     }
 }

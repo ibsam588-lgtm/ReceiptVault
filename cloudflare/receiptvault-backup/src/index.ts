@@ -1033,7 +1033,12 @@ async function syncProviderForUser(
           : `Imported from ${candidate.from || "email"} — ${candidate.subject || "no subject"}`,
         rawText: "",
         imagePath: "",
-        source: "EmailShare"
+        source: "EmailShare",
+        emailUrl: providerId === "gmail"
+          ? `https://mail.google.com/mail/u/0/#all/${candidate.id}`
+          : providerId === "outlook"
+          ? `https://outlook.live.com/mail/0/inbox/id/${encodeURIComponent(candidate.id)}`
+          : null
       };
       await env.RECEIPTS_BUCKET.put(
         `users/${userId}/receipts/${receiptId}/metadata.json`,
