@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/receiptvault-android
+      - main
     paths:
       - "cloudflare/receiptvault-backup/**"
       - ".github/workflows/cloudflare-worker.yml"
