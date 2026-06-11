@@ -490,7 +490,7 @@ function providerConfig(provider: ConnectorProviderId, env: Env): OAuthProviderC
       clientSecret: env.YAHOO_OAUTH_CLIENT_SECRET,
       scope: "mail-r",
       restrictedScope: false,
-      query: "receipt OR order OR invoice OR purchase confirmation OR warranty",
+      query: "receipt OR order OR invoice OR purchase confirmation OR warranty OR bill OR statement",
       reviewRequired: "Yahoo developer app registration"
     };
   }
