@@ -1206,6 +1206,7 @@ private fun PlusScreen(
         item { FeatureRow("Auto email sync every 15 minutes", Icons.Default.Notifications) }
         item { FeatureRow("Unlimited warranty tracking", Icons.Default.Shield) }
         item { FeatureRow("Return and warranty reminders", Icons.Default.DateRange) }
+        item { FeatureRow("CSV and PDF exports", Icons.Default.CheckCircle) }
     }
 }
 
