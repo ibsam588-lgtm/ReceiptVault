@@ -1853,13 +1853,20 @@ private fun ReceiptImage(path: String) {
                     android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
                     else -> 0f
                 }
-                if (degrees == 0f) {
-                    raw.asImageBitmap()
-                } else {
+                val afterExif = if (degrees != 0f) {
                     val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
                     val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
                     raw.recycle()
-                    rotated.asImageBitmap()
+                    rotated
+                } else raw
+                // Fallback: if still landscape after EXIF correction, force portrait
+                if (afterExif.width > afterExif.height) {
+                    val m = android.graphics.Matrix().apply { postRotate(90f) }
+                    val portrait = Bitmap.createBitmap(afterExif, 0, 0, afterExif.width, afterExif.height, m, true)
+                    afterExif.recycle()
+                    portrait.asImageBitmap()
+                } else {
+                    afterExif.asImageBitmap()
                 }
             }.getOrNull()
         }
@@ -2638,11 +2645,22 @@ private class ImageEnhancer(private val context: Context) {
             android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
             else -> 0f
         }
-        if (degrees == 0f) return raw
-        val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
-        val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
-        raw.recycle()
-        return rotated
+        val afterExif = if (degrees != 0f) {
+            val matrix = android.graphics.Matrix().apply { postRotate(degrees) }
+            val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+            raw.recycle()
+            rotated
+        } else raw
+
+        // Fallback: receipts are always portrait (taller than wide). If the image is still
+        // landscape after EXIF correction — e.g. EXIF tag was absent or ORIENTATION_NORMAL
+        // was embedded incorrectly — rotate 90° CW to produce an upright portrait image.
+        return if (afterExif.width > afterExif.height) {
+            val m = android.graphics.Matrix().apply { postRotate(90f) }
+            val portrait = Bitmap.createBitmap(afterExif, 0, 0, afterExif.width, afterExif.height, m, true)
+            afterExif.recycle()
+            portrait
+        } else afterExif
     }
 
     /**
@@ -2671,10 +2689,17 @@ private class ImageEnhancer(private val context: Context) {
     }
 
     /**
-     * Finds the tightest bounding box that contains at least 3 % non-white pixels
-     * per row/column, then crops with a small safety margin.
-     * Only applies the crop when it removes more than 5 % of width or height
-     * (avoids useless crops on already-tight images).
+     * Finds the white-paper receipt region and crops to it.
+     *
+     * After high-contrast grayscale conversion the receipt paper is almost entirely
+     * bright-white (luminance ≥ 210), while fingers, hands, and dark backgrounds
+     * land below that level.  We scan each edge row/column and stop as soon as we
+     * find one whose brightness profile looks like paper:
+     *   • ≥ 35 % of its pixels must be bright-white (the paper background), AND
+     *   • ≥ 1 % must be very dark (the printed text)
+     *
+     * This correctly skips uniformly dark finger/background rows while still
+     * including rows that are mostly white with a few dark text pixels.
      */
     private fun autoCrop(bitmap: Bitmap): Bitmap {
         val w = bitmap.width
@@ -2682,51 +2707,53 @@ private class ImageEnhancer(private val context: Context) {
         val pixels = IntArray(w * h)
         bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        val threshold = 200   // luminance below this → "content"
-        val minFraction = 0.03f  // row/col must have ≥ 3 % dark pixels to count as content
+        val brightThresh = 210   // luminance ≥ this → white paper pixel
+        val darkThresh   = 80    // luminance ≤ this → printed text pixel
+        val minPaper     = 0.35f // row/col must be ≥ 35 % bright-white
+        val minText      = 0.01f // row/col must have ≥ 1 % dark text
 
-        fun rowHasContent(y: Int): Boolean {
-            var dark = 0
+        fun rowIsReceiptArea(y: Int): Boolean {
+            var bright = 0; var dark = 0
             for (x in 0 until w) {
                 val c = pixels[y * w + x]
-                // Average of R, G, B (already greyscale so all channels equal)
-                if (((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3 < threshold) dark++
+                val lum = ((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3
+                if (lum >= brightThresh) bright++ else if (lum <= darkThresh) dark++
             }
-            return dark.toFloat() / w >= minFraction
+            return bright.toFloat() / w >= minPaper && dark.toFloat() / w >= minText
         }
 
-        fun colHasContent(x: Int): Boolean {
-            var dark = 0
+        fun colIsReceiptArea(x: Int): Boolean {
+            var bright = 0; var dark = 0
             for (y in 0 until h) {
                 val c = pixels[y * w + x]
-                if (((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3 < threshold) dark++
+                val lum = ((c shr 16 and 0xFF) + (c shr 8 and 0xFF) + (c and 0xFF)) / 3
+                if (lum >= brightThresh) bright++ else if (lum <= darkThresh) dark++
             }
-            return dark.toFloat() / h >= minFraction
+            return bright.toFloat() / h >= minPaper && dark.toFloat() / h >= minText
         }
 
-        var top = 0; while (top < h - 1 && !rowHasContent(top)) top++
-        var bottom = h - 1; while (bottom > top && !rowHasContent(bottom)) bottom--
-        var left = 0; while (left < w - 1 && !colHasContent(left)) left++
-        var right = w - 1; while (right > left && !colHasContent(right)) right--
+        var top    = 0;     while (top    < h - 1 && !rowIsReceiptArea(top))    top++
+        var bottom = h - 1; while (bottom > top   && !rowIsReceiptArea(bottom)) bottom--
+        var left   = 0;     while (left   < w - 1 && !colIsReceiptArea(left))   left++
+        var right  = w - 1; while (right  > left  && !colIsReceiptArea(right))  right--
 
-        // B2: if the detected content area is suspiciously small (< 10 % of image),
-        // no reliable bill region was found — return the original unmodified bitmap
+        // If the detected window is suspiciously small, bail out
         val rawCropW = right - left
         val rawCropH = bottom - top
         if (rawCropW < w * 0.10f || rawCropH < h * 0.10f) return bitmap
 
-        // Add 3 % padding so we never clip the document edge
-        val padX = (rawCropW * 0.03f).toInt().coerceAtLeast(4)
-        val padY = (rawCropH * 0.03f).toInt().coerceAtLeast(4)
-        left = (left - padX).coerceAtLeast(0)
-        top = (top - padY).coerceAtLeast(0)
-        right = (right + padX).coerceAtMost(w - 1)
+        // Add 2 % safety padding so we never clip the document edge
+        val padX = (rawCropW * 0.02f).toInt().coerceAtLeast(4)
+        val padY = (rawCropH * 0.02f).toInt().coerceAtLeast(4)
+        left   = (left   - padX).coerceAtLeast(0)
+        top    = (top    - padY).coerceAtLeast(0)
+        right  = (right  + padX).coerceAtMost(w - 1)
         bottom = (bottom + padY).coerceAtMost(h - 1)
 
         val cropW = right - left
         val cropH = bottom - top
 
-        // Only crop if we're actually trimming > 5 % from width or height
+        // Only apply crop when it trims > 5 % from at least one dimension
         return if (cropW < w * 0.95f || cropH < h * 0.95f) {
             Bitmap.createBitmap(bitmap, left, top, cropW, cropH)
         } else {
