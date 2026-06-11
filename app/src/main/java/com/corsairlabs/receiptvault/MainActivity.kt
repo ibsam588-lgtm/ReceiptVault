@@ -122,6 +122,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.File
@@ -2199,9 +2200,37 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
             // Issue 1: save the enhanced (auto-cropped + high-contrast) version so users see
             // a clean, readable image in the vault instead of the raw un-cropped original.
             val enhanced = imageEnhancer.enhance(uri)
-            val imagePath = store.saveImageBitmap(enhanced, id)  // save before recycle
-            val rawText = ocrScanner.readText(enhanced)
-            enhanced.recycle()  // free memory after OCR
+
+            // Detect content-rotation: ML Kit reports TextLine bounding boxes whose width
+            // and height reveal text direction. Properly oriented receipt lines are wide
+            // (width >> height). If the camera embedded content sideways in a portrait JPEG
+            // (EXIF ORIENTATION_NORMAL but content rotated 90°), lines appear tall/narrow.
+            // In that case we rotate 90° CW before saving so the stored image is upright.
+            val ocrResult = ocrScanner.readTextResult(enhanced)
+            val orientedBitmap = run {
+                val lines = ocrResult.textBlocks.flatMap { it.lines }
+                val aspects = lines.mapNotNull { line ->
+                    val b = line.boundingBox ?: return@mapNotNull null
+                    if (b.height() > 0) b.width().toFloat() / b.height() else null
+                }
+                val avgAspect = if (aspects.isNotEmpty()) aspects.average() else 1.0
+                if (avgAspect < 0.85) {
+                    // Lines are taller than wide → content is rotated 90° → correct it
+                    val matrix = android.graphics.Matrix().apply { postRotate(90f) }
+                    val r = Bitmap.createBitmap(enhanced, 0, 0, enhanced.width, enhanced.height, matrix, true)
+                    enhanced.recycle()
+                    r
+                } else enhanced
+            }
+
+            val imagePath = store.saveImageBitmap(orientedBitmap, id)
+            // Re-run OCR on the corrected image if we rotated; otherwise reuse what we have
+            val rawText = if (orientedBitmap !== enhanced) {
+                ocrScanner.readText(orientedBitmap)
+            } else {
+                ocrResult.text
+            }
+            orientedBitmap.recycle()  // free memory after OCR
             val localDraft = parser.parse(rawText)
             val draft = parser.mergeWithAi(localDraft, aiClient.categorize(rawText, source))
             val receipt = Receipt(
@@ -2582,6 +2611,17 @@ private class OcrScanner(private val context: Context) {
         return suspendCancellableCoroutine { continuation ->
             recognizer.process(image)
                 .addOnSuccessListener { text -> continuation.resume(text.text) }
+                .addOnFailureListener { error -> continuation.resumeWithException(error) }
+        }
+    }
+
+    /** Returns the full ML Kit Text result (with TextBlocks/TextLines) so callers can
+     *  inspect bounding boxes for content-rotation detection. */
+    suspend fun readTextResult(bitmap: Bitmap): Text {
+        val image = InputImage.fromBitmap(bitmap, 0)
+        return suspendCancellableCoroutine { continuation ->
+            recognizer.process(image)
+                .addOnSuccessListener { text -> continuation.resume(text) }
                 .addOnFailureListener { error -> continuation.resumeWithException(error) }
         }
     }
