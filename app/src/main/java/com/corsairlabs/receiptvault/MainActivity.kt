@@ -1199,10 +1199,11 @@ private fun PlusScreen(
             )
         }
         item { FeatureRow("1,000 stored receipts", Icons.Default.CheckCircle) }
-        item { FeatureRow("Cloud backup with R2", Icons.Default.Shield) }
-        item { FeatureRow("Gemini receipt categorization", Icons.Default.Star) }
+        item { FeatureRow("Cloud backup", Icons.Default.Shield) }
+        item { FeatureRow("AI receipt categorization", Icons.Default.Star) }
         item { FeatureRow("3 connected email accounts", Icons.Default.Email) }
         item { FeatureRow("250 receipt email imports monthly", Icons.Default.Email) }
+        item { FeatureRow("Auto email sync every 15 minutes", Icons.Default.Notifications) }
         item { FeatureRow("Unlimited warranty tracking", Icons.Default.Shield) }
         item { FeatureRow("Return and warranty reminders", Icons.Default.DateRange) }
         item { FeatureRow("CSV and PDF exports", Icons.Default.CheckCircle) }
