@@ -97,6 +97,7 @@ dependencies {
     implementation(libs.mlkit.text.recognition)
     implementation(libs.play.billing)
     implementation(libs.play.services.auth)
+    implementation(libs.androidx.work.runtime.ktx)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

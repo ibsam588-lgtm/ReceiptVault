@@ -121,15 +121,17 @@ class EmailConnectorClient {
         val connection = (URL("$apiBase/v1/connectors/sync").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10000
-            readTimeout = 25000
+            // Paid plans can scan up to 500 messages with pagination, which takes longer.
+            readTimeout = 120000
             doOutput = true
             setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Content-Type", "application/json")
         }
 
+        // No maxCandidates: the Worker applies the plan-based limit
+        // (Free: 10, Plus: 100, Business: 500 with full Gmail pagination).
         val body = JSONObject()
             .put("provider", provider.providerId)
-            .put("maxCandidates", 10)
             .toString()
         connection.outputStream.use { output ->
             output.write(body.toByteArray(Charsets.UTF_8))

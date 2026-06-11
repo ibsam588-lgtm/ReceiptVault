@@ -117,7 +117,10 @@ type ConnectorSyncReport = {
   message: string;
   receipts?: Record<string, unknown>[];
   error?: string;
+  plan?: EffectivePlan;
 };
+
+type EffectivePlan = "free" | "plus" | "business";
 
 type OAuthState = {
   provider: ConnectorProviderId;
@@ -775,13 +778,46 @@ async function syncConnectorAccounts(request: Request, env: Env, user: JWTPayloa
   const provider = body.provider ? normalizeProvider(body.provider) : null;
   if (body.provider && !provider) return json({ error: "unsupported_provider" }, 400);
 
+  // Determine the user's plan before syncing so paid users get higher scan limits.
+  const plan = await getEffectivePlan(env, user);
+  const limit = planSyncLimit(plan, body.maxCandidates);
+
   const reports = await syncProvidersForUser(
     env,
     String(user.sub || ""),
     provider || undefined,
-    normalizeSyncLimit(body.maxCandidates)
+    limit,
+    plan !== "free",
+    plan
   );
   return json({ ok: true, reports });
+}
+
+async function getEffectivePlan(env: Env, user: JWTPayload): Promise<EffectivePlan> {
+  if (typeof user.plan === "string") {
+    if (user.plan === "business") return "business";
+    if (user.plan === "plus" || user.plan === "pro") return "plus";
+  }
+  if (hasPlus(user)) return "plus";
+  const entitlement = await loadBillingEntitlement(env, String(user.sub || ""));
+  if (entitlement?.active) {
+    return entitlement.plan === "business" ? "business" : "plus";
+  }
+  return "free";
+}
+
+async function loadBillingEntitlement(env: Env, userId: string): Promise<{ active: boolean; plan: string } | null> {
+  const object = await env.RECEIPTS_BUCKET.get(billingEntitlementObjectName(userId));
+  if (!object) return null;
+  const data: Record<string, unknown> = await object.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  return { active: data.active === true, plan: typeof data.plan === "string" ? data.plan : "free" };
+}
+
+function planSyncLimit(plan: EffectivePlan, requested: unknown): number {
+  const max = plan === "business" ? 500 : plan === "plus" ? 100 : 10;
+  const r = typeof requested === "number" ? requested : typeof requested === "string" ? Number(requested) : max;
+  if (!Number.isFinite(r) || r <= 0) return max;
+  return Math.min(Math.floor(r), max);
 }
 
 async function readConnectorSyncBody(request: Request): Promise<ConnectorSyncRequest> {
@@ -810,7 +846,9 @@ async function syncProvidersForUser(
   env: Env,
   userId: string,
   provider?: ConnectorProviderId,
-  maxCandidates = 10
+  maxCandidates = 10,
+  paginate = false,
+  plan: EffectivePlan = "free"
 ): Promise<ConnectorSyncReport[]> {
   const providers: ConnectorProviderId[] = provider ? [provider] : ["gmail", "outlook", "yahoo", "imap"];
   const reports: ConnectorSyncReport[] = [];
@@ -818,7 +856,7 @@ async function syncProvidersForUser(
   for (const providerId of providers) {
     const metadata = await readConnectorMetadata(env, userId, providerId);
     if (!metadata) continue;
-    const report = await syncProviderForUser(env, userId, providerId, metadata, maxCandidates);
+    const report = await syncProviderForUser(env, userId, providerId, metadata, maxCandidates, paginate, plan);
     await writeSyncReport(env, userId, report);
     reports.push(report);
   }
@@ -831,7 +869,9 @@ async function syncProviderForUser(
   userId: string,
   providerId: ConnectorProviderId,
   metadata: StoredConnectorMetadata,
-  maxCandidates: number
+  maxCandidates: number,
+  paginate = false,
+  plan: EffectivePlan = "free"
 ): Promise<ConnectorSyncReport> {
   const syncedAt = new Date().toISOString();
 
@@ -846,7 +886,8 @@ async function syncProviderForUser(
         candidates: 0,
         imported: 0,
         matchedSignals: [],
-        message: "Manual IMAP settings are stored encrypted. Full IMAP message polling requires the provider-specific IMAP fetch worker before import."
+        message: "Manual IMAP settings are stored encrypted. Full IMAP message polling requires the provider-specific IMAP fetch worker before import.",
+        plan
       };
     }
 
@@ -860,7 +901,8 @@ async function syncProviderForUser(
         candidates: 0,
         imported: 0,
         matchedSignals: [],
-        message: "Yahoo OAuth is connected. Yahoo receipt import will use the IMAP fetch worker after provider-specific mailbox polling is enabled."
+        message: "Yahoo OAuth is connected. Yahoo receipt import will use the IMAP fetch worker after provider-specific mailbox polling is enabled.",
+        plan
       };
     }
 
@@ -876,7 +918,7 @@ async function syncProviderForUser(
     if (!refreshed.access_token) return syncError(providerId, syncedAt, "missing_access_token");
 
     const candidates = providerId === "gmail"
-      ? await fetchGmailCandidates(provider, refreshed.access_token, maxCandidates)
+      ? await fetchGmailCandidates(provider, refreshed.access_token, maxCandidates, paginate)
       : await fetchOutlookCandidates(provider, refreshed.access_token, maxCandidates);
     const receiptCandidates = candidates
       .filter((candidate) => !isExcludedSender(candidate.from))
@@ -929,6 +971,7 @@ async function syncProviderForUser(
       imported: importedReceipts.length,
       matchedSignals,
       receipts: importedReceipts,
+      plan,
       message: importedReceipts.length > 0
         ? `Imported ${importedReceipts.length} receipt${importedReceipts.length === 1 ? "" : "s"} from ${candidates.length} scanned messages.`
         : `Scanned ${candidates.length} messages; none matched receipt signals strongly enough to import.`
@@ -1011,45 +1054,52 @@ async function refreshOAuthToken(provider: OAuthProviderConfig, refreshToken: st
 async function fetchGmailCandidates(
   provider: OAuthProviderConfig,
   accessToken: string,
-  maxCandidates: number
+  maxCandidates: number,
+  paginate = false
 ): Promise<ProviderMessageCandidate[]> {
-  const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-  listUrl.searchParams.set("q", provider.query);
-  listUrl.searchParams.set("maxResults", String(maxCandidates));
-
-  const listResponse = await fetch(listUrl, {
-    headers: { authorization: `Bearer ${accessToken}` }
-  });
-  if (!listResponse.ok) throw new Error(`gmail_list_failed:${listResponse.status}`);
-
-  const list = await listResponse.json<Record<string, unknown>>();
-  const messages = Array.isArray(list.messages) ? list.messages.filter(isRecord).slice(0, maxCandidates) : [];
   const candidates: ProviderMessageCandidate[] = [];
+  let pageToken: string | undefined;
 
-  for (const message of messages) {
-    const id = typeof message.id === "string" ? message.id : "";
-    if (!id) continue;
-    const detailUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}`);
-    detailUrl.searchParams.set("format", "metadata");
-    detailUrl.searchParams.append("metadataHeaders", "Subject");
-    detailUrl.searchParams.append("metadataHeaders", "From");
-    detailUrl.searchParams.append("metadataHeaders", "Date");
+  do {
+    const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
+    listUrl.searchParams.set("q", provider.query);
+    listUrl.searchParams.set("maxResults", String(Math.min(50, maxCandidates - candidates.length)));
+    if (pageToken) listUrl.searchParams.set("pageToken", pageToken);
 
-    const detailResponse = await fetch(detailUrl, {
-      headers: { authorization: `Bearer ${accessToken}` }
-    });
-    if (!detailResponse.ok) continue;
-    const detail: Record<string, unknown> = await detailResponse.json<Record<string, unknown>>().catch(() => ({}));
-    const headers = gmailHeaders(detail);
-    candidates.push({
-      id,
-      subject: headers.Subject,
-      from: headers.From,
-      date: headers.Date,
-      snippet: typeof detail.snippet === "string" ? detail.snippet : "",
-      hasAttachments: false
-    });
-  }
+    const listResponse = await fetch(listUrl, { headers: { authorization: `Bearer ${accessToken}` } });
+    if (!listResponse.ok) throw new Error(`gmail_list_failed:${listResponse.status}`);
+
+    const list = await listResponse.json<Record<string, unknown>>();
+    const messages = Array.isArray(list.messages) ? list.messages.filter(isRecord) : [];
+
+    for (const message of messages) {
+      if (candidates.length >= maxCandidates) break;
+      const id = typeof message.id === "string" ? message.id : "";
+      if (!id) continue;
+
+      const detailUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}`);
+      detailUrl.searchParams.set("format", "metadata");
+      detailUrl.searchParams.append("metadataHeaders", "Subject");
+      detailUrl.searchParams.append("metadataHeaders", "From");
+      detailUrl.searchParams.append("metadataHeaders", "Date");
+
+      const detailResponse = await fetch(detailUrl, { headers: { authorization: `Bearer ${accessToken}` } });
+      if (!detailResponse.ok) continue;
+      const detail: Record<string, unknown> = await detailResponse.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+      const headers = gmailHeaders(detail);
+      candidates.push({
+        id,
+        subject: headers.Subject,
+        from: headers.From,
+        date: headers.Date,
+        snippet: typeof detail.snippet === "string" ? detail.snippet : "",
+        hasAttachments: false
+      });
+    }
+
+    const nextToken = typeof list.nextPageToken === "string" ? list.nextPageToken : undefined;
+    pageToken = (paginate && candidates.length < maxCandidates) ? nextToken : undefined;
+  } while (pageToken);
 
   return candidates;
 }

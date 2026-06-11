@@ -1704,7 +1704,25 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             billingState.collect {
                 _activePlan.value = connectorStore.currentPlan()
+                updateBackgroundSyncSchedule()
             }
+        }
+    }
+
+    /**
+     * Background email sync runs only for paid (Plus/Business) users with at least one
+     * connected account. Schedules the periodic WorkManager job when those conditions hold
+     * and cancels it on downgrade or when every account is disconnected.
+     */
+    private fun updateBackgroundSyncSchedule() {
+        val context = getApplication<Application>()
+        val hasActiveAccount = _emailAccounts.value.any {
+            it.status == ConnectorStatus.Ready || it.status == ConnectorStatus.SyncReady
+        }
+        if (_activePlan.value != ReceiptVaultPlan.Free && hasActiveAccount) {
+            EmailSyncScheduler.schedule(context)
+        } else {
+            EmailSyncScheduler.cancel(context)
         }
     }
 
@@ -1913,6 +1931,8 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 )
                 _emailAccounts.value = result.accounts
                 _message.value = result.message
+                // Paid users get periodic background sync once a manual sync succeeds.
+                updateBackgroundSyncSchedule()
             } catch (error: Exception) {
                 val detail = error.message?.takeIf { it.isNotBlank() } ?: "unknown backend error"
                 val result = connectorStore.markSyncReady(id, message = "Could not reach connector sync: $detail.")
@@ -1933,6 +1953,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         val result = connectorStore.disconnect(id)
         _emailAccounts.value = result.accounts
         _message.value = result.message
+        updateBackgroundSyncSchedule()
         if (provider != null) {
             viewModelScope.launch {
                 connectorClient.deleteAccount(provider)
@@ -1945,6 +1966,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         val result = connectorStore.deleteAccountData(id)
         _emailAccounts.value = result.accounts
         _message.value = result.message
+        updateBackgroundSyncSchedule()
         if (provider != null) {
             viewModelScope.launch {
                 connectorClient.deleteAccount(provider)
@@ -1964,6 +1986,8 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 val updated = connectorStore.syncFromRemote(remote)
                 _emailAccounts.value = updated
                 _message.value = "Email accounts updated."
+                // A paid user just connected an account — start periodic background sync.
+                updateBackgroundSyncSchedule()
             }
         }
     }
@@ -2032,7 +2056,7 @@ private fun authErrorMessage(error: Exception): String {
     }
 }
 
-private class ReceiptStore(private val context: Context) {
+internal class ReceiptStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("receiptvault", Context.MODE_PRIVATE)
 
     fun loadReceipts(): List<Receipt> {
