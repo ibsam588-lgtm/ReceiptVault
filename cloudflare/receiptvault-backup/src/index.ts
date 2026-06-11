@@ -460,7 +460,7 @@ function providerConfig(provider: ConnectorProviderId, env: Env): OAuthProviderC
       clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
       scope: "https://www.googleapis.com/auth/gmail.readonly",
       restrictedScope: true,
-      query: 'newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty) -from:google.com -from:googleplay.com',
+      query: 'newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty OR "your bill" OR "bill is ready" OR "payment due" OR "statement available" OR "monthly statement") -from:google.com -from:googleplay.com',
       reviewRequired: "Google OAuth restricted-scope verification and possible security assessment"
     };
   }
@@ -1252,7 +1252,7 @@ async function fetchOutlookCandidates(
   const searchUrl = new URL("https://graph.microsoft.com/v1.0/me/messages");
   searchUrl.searchParams.set("$top", String(maxCandidates));
   searchUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments");
-  searchUrl.searchParams.set("$search", "\"receipt OR order OR invoice OR purchase confirmation OR warranty\"");
+  searchUrl.searchParams.set("$search", "\"receipt OR order OR invoice OR purchase confirmation OR warranty OR bill OR statement\"");
 
   let response = await fetch(searchUrl, {
     headers: { authorization: `Bearer ${accessToken}` }
@@ -1502,6 +1502,7 @@ function receiptSignals(text: string): string[] {
     ["return", /\breturn window\b|\bdays? to return\b|\breturn eligible\b|\bfree returns?\b/],
     // Bare "warranty" matches Google Play / device setup emails — require product-warranty context.
     ["warranty", /\b(?:extended|limited|manufacturer'?s?|\d+[\s-]?(?:year|yr|month))\s+warranty\b|\bwarranty\s+(?:card|period|coverage|registration|information|claim)\b|\bprotection plan\b/],
+    ["bill", /\b(?:your\s+)?bill\s+(?:is\s+ready|summary|due|has\s+arrived)\b|\bpayment\s+due\b|\bstatement\s+(?:available|ready|summary)\b|\bmonthly\s+(?:bill|statement)\b/i],
     ["merchant", /\bamazon\b|\bwalmart\b|\btarget\b|\bcostco\b|\bbest buy\b|\bhome depot\b|\blowe'?s\b|\bapple\b|\bstaples\b/]
   ];
   return patterns

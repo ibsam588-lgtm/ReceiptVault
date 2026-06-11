@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
@@ -389,7 +390,15 @@ private fun ReceiptVaultApp(
                 )
                 AppScreen.Detail -> ReceiptDetailScreen(
                     receipt = viewModel.selectedReceipt ?: receipts.firstOrNull(),
-                    onBack = { onScreenChange(AppScreen.Home) }
+                    onBack = { onScreenChange(AppScreen.Home) },
+                    onDelete = {
+                        val id = viewModel.selectedReceipt?.id
+                        if (id != null) {
+                            viewModel.deleteReceipt(id) { onScreenChange(AppScreen.Home) }
+                        } else {
+                            onScreenChange(AppScreen.Home)
+                        }
+                    }
                 )
             }
 
@@ -1234,7 +1243,7 @@ private fun BillingOfferCard(
 }
 
 @Composable
-private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit) {
+private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete: () -> Unit) {
     if (receipt == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1259,6 +1268,10 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit) {
                     Text(formatCurrency(receipt.amountCents), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
                 }
                 AssistChip(onClick = {}, label = { Text(receipt.source.label) })
+                Spacer(Modifier.width(8.dp))
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete receipt", tint = Coral)
+                }
             }
         }
         item {
@@ -1846,6 +1859,15 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         selectedReceiptId = id
     }
 
+    fun deleteReceipt(id: String, onDeleted: () -> Unit) {
+        _receipts.value = store.delete(id)
+        if (selectedReceiptId == id) {
+            selectedReceiptId = _receipts.value.firstOrNull()?.id
+        }
+        _message.value = "Receipt deleted."
+        onDeleted()
+    }
+
     fun connectEmailProvider(provider: EmailProvider) {
         val result = connectorStore.connect(provider)
         _emailAccounts.value = result.accounts
@@ -2071,6 +2093,13 @@ internal class ReceiptStore(private val context: Context) {
 
     fun upsert(receipt: Receipt): List<Receipt> {
         val updated = (loadReceipts().filterNot { it.id == receipt.id } + receipt)
+            .sortedByDescending { it.purchasedAtMillis }
+        prefs.edit().putString("receipts", JSONArray(updated.map { it.toJson() }).toString()).apply()
+        return updated
+    }
+
+    fun delete(id: String): List<Receipt> {
+        val updated = loadReceipts().filterNot { it.id == id }
             .sortedByDescending { it.purchasedAtMillis }
         prefs.edit().putString("receipts", JSONArray(updated.map { it.toJson() }).toString()).apply()
         return updated
