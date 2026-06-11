@@ -460,7 +460,7 @@ function providerConfig(provider: ConnectorProviderId, env: Env): OAuthProviderC
       clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
       scope: "https://www.googleapis.com/auth/gmail.readonly",
       restrictedScope: true,
-      query: 'newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty OR "your bill" OR "bill is ready" OR "payment due" OR "statement available" OR "monthly statement") -from:google.com -from:googleplay.com',
+      query: 'newer_than:90d (receipt OR order OR invoice OR "purchase confirmation" OR warranty OR bill OR "utility bill" OR "payment due" OR "statement available" OR "monthly statement") -from:google.com -from:googleplay.com',
       reviewRequired: "Google OAuth restricted-scope verification and possible security assessment"
     };
   }
@@ -997,17 +997,40 @@ async function syncProviderForUser(
         ? await fetchGmailMessageFullText(refreshed.access_token as string, candidate.id)
         : candidate.snippet || "";
       const purchasedAtMs = candidate.date ? Date.parse(candidate.date) : Date.now();
+
+      // Gemini categorization — best-effort, falls back to regex if unavailable
+      const ai = await callGeminiForEmail(
+        env,
+        candidate.subject || "",
+        candidate.from || "",
+        candidate.date || "",
+        bodyText
+      );
+
+      const merchant = (typeof ai?.merchant === "string" && ai.merchant.trim())
+        ? ai.merchant.trim()
+        : extractMerchant(candidate.from || "");
+      const amountCents = (typeof ai?.total === "number" && ai.total > 0)
+        ? Math.round(ai.total * 100)
+        : extractAmountCents(`${candidate.subject || ""} ${bodyText}`);
+      const category = typeof ai?.category === "string" && ai.category !== "Uncategorized"
+        ? ai.category
+        : "Uncategorized";
+      const aiConfidence = typeof ai?.confidence === "number" ? ai.confidence : 0;
+
       // Use bodyText only in memory for extraction — do NOT persist raw email content
       const receipt: Record<string, unknown> = {
         id: receiptId,
-        merchant: extractMerchant(candidate.from || ""),
-        amountCents: extractAmountCents(`${candidate.subject || ""} ${bodyText}`),
+        merchant,
+        amountCents,
         purchasedAtMillis: Number.isNaN(purchasedAtMs) ? Date.now() : purchasedAtMs,
-        category: "Uncategorized",
+        category,
         location: "Location not detected",
         returnByMillis: null,
         warrantyUntilMillis: null,
-        notes: `Imported from ${candidate.from || "email"} — ${candidate.subject || "no subject"}`,
+        notes: aiConfidence > 0.6
+          ? `Gemini categorized ${Math.round(aiConfidence * 100)}% — ${candidate.from || "email"} · ${candidate.subject || "no subject"}`
+          : `Imported from ${candidate.from || "email"} — ${candidate.subject || "no subject"}`,
         rawText: "",
         imagePath: "",
         source: "EmailShare"
@@ -1502,7 +1525,7 @@ function receiptSignals(text: string): string[] {
     ["return", /\breturn window\b|\bdays? to return\b|\breturn eligible\b|\bfree returns?\b/],
     // Bare "warranty" matches Google Play / device setup emails — require product-warranty context.
     ["warranty", /\b(?:extended|limited|manufacturer'?s?|\d+[\s-]?(?:year|yr|month))\s+warranty\b|\bwarranty\s+(?:card|period|coverage|registration|information|claim)\b|\bprotection plan\b/],
-    ["bill", /\b(?:your\s+)?bill\s+(?:is\s+ready|summary|due|has\s+arrived)\b|\bpayment\s+due\b|\bstatement\s+(?:available|ready|summary)\b|\bmonthly\s+(?:bill|statement)\b/i],
+    ["bill", /\b(?:utility|water|electric(?:ity)?|gas|phone|cable|internet|monthly|annual|quarterly|your|new)\s+(?:e-?)?bill\b|\be-?bill\b|\bbill\s*[-–—]?\s*(?:due|payment|summary|statement)\b|\bamount\s+due\b|\bpayment\s+due\b|\bstatement\s+(?:available|ready|summary)\b/i],
     ["merchant", /\bamazon\b|\bwalmart\b|\btarget\b|\bcostco\b|\bbest buy\b|\bhome depot\b|\blowe'?s\b|\bapple\b|\bstaples\b/]
   ];
   return patterns
@@ -1598,6 +1621,40 @@ function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): st
     "Receipt/order text:",
     ocrText
   ].join("\n");
+}
+
+async function callGeminiForEmail(
+  env: Env,
+  subject: string,
+  from: string,
+  date: string,
+  bodyText: string
+): Promise<Record<string, unknown> | null> {
+  if (!env.GEMINI_API_KEY || !bodyText.trim()) return null;
+  const prompt = buildCategorizationPrompt(
+    { emailSubject: subject, emailFrom: from, emailDate: date },
+    bodyText.slice(0, 6000)
+  );
+  const model = env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+      })
+    });
+    if (!res.ok) return null;
+    const json = await res.json<Record<string, unknown>>().catch(() => null);
+    if (!json) return null;
+    const text = extractGeminiText(json);
+    if (!text) return null;
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 function extractGeminiText(result: Record<string, unknown>): string | null {

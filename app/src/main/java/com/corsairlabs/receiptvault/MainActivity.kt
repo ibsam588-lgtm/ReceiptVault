@@ -13,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -89,6 +90,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -96,6 +98,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
@@ -336,6 +339,7 @@ private fun ReceiptVaultApp(
                     NavItem(AppScreen.Scan, currentScreen, onScreenChange)
                     NavItem(AppScreen.Email, currentScreen, onScreenChange)
                     NavItem(AppScreen.Warranties, currentScreen, onScreenChange)
+                    NavItem(AppScreen.Analytics, currentScreen, onScreenChange)
                     NavItem(AppScreen.Plus, currentScreen, onScreenChange)
                 }
             }
@@ -375,6 +379,7 @@ private fun ReceiptVaultApp(
                 )
 
                 AppScreen.Warranties -> WarrantyScreen(receipts)
+                AppScreen.Analytics -> AnalyticsScreen(receipts = receipts)
                 AppScreen.Email -> EmailConnectorsScreen(
                     accounts = emailAccounts,
                     plan = activePlan,
@@ -1380,6 +1385,166 @@ private fun ImportCard(
 }
 
 @Composable
+private fun AnalyticsScreen(receipts: List<Receipt>) {
+    // Build last 6 months spending data
+    val monthlyData: List<Pair<String, Long>> = run {
+        val calendar = java.util.Calendar.getInstance()
+        (5 downTo 0).map { monthsBack ->
+            calendar.time = java.util.Date()
+            calendar.add(java.util.Calendar.MONTH, -monthsBack)
+            val month = calendar.get(java.util.Calendar.MONTH)
+            val year = calendar.get(java.util.Calendar.YEAR)
+            val label = java.text.SimpleDateFormat("MMM", java.util.Locale.US).format(calendar.time)
+            val total = receipts.filter {
+                val cal = java.util.Calendar.getInstance().also { c -> c.timeInMillis = it.purchasedAtMillis }
+                cal.get(java.util.Calendar.MONTH) == month && cal.get(java.util.Calendar.YEAR) == year
+            }.sumOf { it.amountCents }
+            label to total
+        }
+    }
+
+    // Category totals
+    val categoryTotals: List<Pair<String, Long>> = receipts
+        .groupBy { it.category }
+        .map { (cat, items) -> cat to items.sumOf { it.amountCents } }
+        .sortedByDescending { it.second }
+        .take(5)
+
+    val categoryColors = listOf(Teal, Coral, Amber, VaultBlue, Color(0xFF7C4DFF))
+    val maxMonthly = monthlyData.maxOfOrNull { it.second }?.takeIf { it > 0 } ?: 1L
+    val totalSpent = receipts.sumOf { it.amountCents }
+    val avgAmount = if (receipts.isNotEmpty()) totalSpent / receipts.size else 0L
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            // Stats row
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatCard(Modifier.weight(1f), "Total spent", formatCurrency(totalSpent), Teal)
+                StatCard(Modifier.weight(1f), "Avg receipt", formatCurrency(avgAmount), Coral)
+                StatCard(Modifier.weight(1f), "Receipts", receipts.size.toString(), Amber)
+            }
+        }
+        item {
+            // Monthly bar chart
+            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Monthly spending", fontWeight = FontWeight.ExtraBold)
+                    if (monthlyData.all { it.second == 0L }) {
+                        Text("No spending data yet.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Canvas(modifier = Modifier.fillMaxWidth().height(160.dp)) {
+                            val barCount = monthlyData.size
+                            val totalWidth = size.width
+                            val barSpacing = totalWidth * 0.05f / barCount
+                            val barWidth = (totalWidth - barSpacing * (barCount + 1)) / barCount
+                            val maxBarHeight = size.height - 28.dp.toPx()
+
+                            monthlyData.forEachIndexed { i, (label, amount) ->
+                                val x = barSpacing * (i + 1) + barWidth * i
+                                val barHeight = if (amount > 0) (amount.toFloat() / maxMonthly.toFloat()) * maxBarHeight else 4.dp.toPx()
+                                val y = size.height - barHeight - 24.dp.toPx()
+
+                                drawRoundRect(
+                                    color = if (i == monthlyData.lastIndex) Teal else Teal.copy(alpha = 0.45f),
+                                    topLeft = androidx.compose.ui.geometry.Offset(x, y),
+                                    size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
+                                )
+
+                                drawContext.canvas.nativeCanvas.drawText(
+                                    label,
+                                    x + barWidth / 2,
+                                    size.height - 4.dp.toPx(),
+                                    android.graphics.Paint().apply {
+                                        color = android.graphics.Color.parseColor("#888999")
+                                        textSize = 10.sp.toPx()
+                                        textAlign = android.graphics.Paint.Align.CENTER
+                                        isAntiAlias = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            // Category breakdown
+            Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("By category", fontWeight = FontWeight.ExtraBold)
+                    if (categoryTotals.isEmpty()) {
+                        Text("No category data yet.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            // Donut
+                            val catTotal = categoryTotals.sumOf { it.second }.takeIf { it > 0 } ?: 1L
+                            Canvas(modifier = Modifier.size(120.dp)) {
+                                val strokeWidth = 28.dp.toPx()
+                                val radius = (size.minDimension - strokeWidth) / 2
+                                val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
+                                var startAngle = -90f
+                                categoryTotals.forEachIndexed { i, (_, amount) ->
+                                    val sweep = (amount.toFloat() / catTotal.toFloat()) * 360f
+                                    drawArc(
+                                        color = categoryColors.getOrElse(i) { Muted },
+                                        startAngle = startAngle,
+                                        sweepAngle = sweep - 1f,
+                                        useCenter = false,
+                                        topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                                        size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidth)
+                                    )
+                                    startAngle += sweep
+                                }
+                            }
+                            // Legend
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
+                                categoryTotals.forEachIndexed { i, (cat, amount) ->
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(categoryColors.getOrElse(i) { Muted }))
+                                        Text(cat, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(formatCurrency(amount), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            // Top merchants
+            if (receipts.isNotEmpty()) {
+                val topMerchants = receipts
+                    .groupBy { it.merchant }
+                    .map { (merchant, items) -> merchant to items.sumOf { it.amountCents } }
+                    .sortedByDescending { it.second }
+                    .take(5)
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Top merchants", fontWeight = FontWeight.ExtraBold)
+                        topMerchants.forEach { (merchant, amount) ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
+                                    MerchantMark(merchant)
+                                    Text(merchant, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Text(formatCurrency(amount), fontWeight = FontWeight.ExtraBold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun StatCard(modifier: Modifier, label: String, value: String, accent: Color) {
     Card(modifier = modifier, shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
         Column(Modifier.padding(12.dp)) {
@@ -1617,6 +1782,7 @@ private fun RowScope.NavItem(screen: AppScreen, current: AppScreen, onChange: (A
         AppScreen.Scan -> Icons.Default.Add
         AppScreen.Email -> Icons.Default.Email
         AppScreen.Warranties -> Icons.Default.Shield
+        AppScreen.Analytics -> Icons.Default.DateRange
         AppScreen.Plus -> Icons.Default.Star
         AppScreen.Detail -> Icons.Default.Info
     }
@@ -2367,6 +2533,7 @@ enum class AppScreen(val title: String, val navLabel: String) {
     Scan("Add receipt", "Add"),
     Email("Email accounts", "Email"),
     Warranties("Warranties", "Warranty"),
+    Analytics("Analytics", "Charts"),
     Plus("ReceiptVault Plus", "Plus"),
     Detail("Receipt", "Receipt")
 }
