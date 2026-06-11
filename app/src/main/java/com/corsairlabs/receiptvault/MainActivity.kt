@@ -14,6 +14,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -249,8 +250,25 @@ private fun ReceiptVaultRoot(
     }
 
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
+    var showExitDialog by rememberSaveable { mutableStateOf(false) }
+
+    // Issue 4: ask user before quitting from the home/root screen
+    BackHandler(enabled = screen == AppScreen.Home) { showExitDialog = true }
 
     ReceiptVaultTheme {
+        if (showExitDialog) {
+            AlertDialog(
+                onDismissRequest = { showExitDialog = false },
+                title = { Text("Quit ReceiptVault?") },
+                text = { Text("Are you sure you want to quit the app?") },
+                confirmButton = {
+                    TextButton(onClick = { (context as? Activity)?.finish() }) { Text("Quit") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showExitDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
         if (showDeleteAccountDialog) {
             AlertDialog(
                 onDismissRequest = { showDeleteAccountDialog = false },
@@ -405,7 +423,7 @@ private fun ReceiptVaultApp(
                 )
 
                 AppScreen.Warranties -> WarrantyScreen(receipts)
-                AppScreen.Analytics -> AnalyticsScreen(receipts = receipts)
+                AppScreen.Analytics -> AnalyticsScreen(receipts = receipts, activePlan = activePlan)
                 AppScreen.Email -> EmailConnectorsScreen(
                     accounts = emailAccounts,
                     plan = activePlan,
@@ -1477,7 +1495,7 @@ private fun ImportCard(
 }
 
 @Composable
-private fun AnalyticsScreen(receipts: List<Receipt>) {
+private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPlan = ReceiptVaultPlan.Free) {
     // Build last 6 months spending data
     val monthlyData: List<Pair<String, Long>> = run {
         val calendar = java.util.Calendar.getInstance()
@@ -1633,7 +1651,56 @@ private fun AnalyticsScreen(receipts: List<Receipt>) {
                 }
             }
         }
+        // Issue 5: tax-ready CSV export for Business plan users
+        if (activePlan == ReceiptVaultPlan.Business) {
+            item { TaxExportCard(receipts) }
+        }
     }
+}
+
+@Composable
+private fun TaxExportCard(receipts: List<Receipt>) {
+    val context = LocalContext.current
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Tax-ready export", fontWeight = FontWeight.ExtraBold)
+            Text(
+                "Export all receipts as a CSV file with columns for Date, Merchant, Category, Amount, Tax Amount, and Notes — ready to hand to your accountant or import into tax software.",
+                color = Muted,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Button(
+                onClick = {
+                    val csv = buildTaxCsv(receipts)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "ReceiptVault Tax Export")
+                        putExtra(Intent.EXTRA_TEXT, csv)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Share tax export"))
+                },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Teal)
+            ) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Export CSV")
+            }
+        }
+    }
+}
+
+private fun buildTaxCsv(receipts: List<Receipt>): String {
+    val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val header = "Date,Merchant,Category,Amount,Tax Amount,Notes"
+    val rows = receipts.sortedByDescending { it.purchasedAtMillis }.map { r ->
+        val date = Instant.ofEpochMilli(r.purchasedAtMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(fmt)
+        val amount = "%.2f".format(r.amountCents / 100.0)
+        fun csvField(s: String) = "\"${s.replace("\"", "\"\"")}\""
+        listOf(date, csvField(r.merchant), csvField(r.category), amount, "", csvField(r.notes)).joinToString(",")
+    }
+    return (listOf(header) + rows).joinToString("\n")
 }
 
 @Composable
@@ -2098,13 +2165,14 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         _isBusy.value = true
         return try {
             val id = UUID.randomUUID().toString()
-            // Enhance image only for OCR; X2: save the original colour photo for the vault
+            // Issue 1: save the enhanced (auto-cropped + high-contrast) version so users see
+            // a clean, readable image in the vault instead of the raw un-cropped original.
             val enhanced = imageEnhancer.enhance(uri)
+            val imagePath = store.saveImageBitmap(enhanced, id)  // save before recycle
             val rawText = ocrScanner.readText(enhanced)
-            enhanced.recycle()  // done with enhanced — original is saved below
+            enhanced.recycle()  // free memory after OCR
             val localDraft = parser.parse(rawText)
             val draft = parser.mergeWithAi(localDraft, aiClient.categorize(rawText, source))
-            val imagePath = store.saveImage(uri, id)
             val receipt = Receipt(
                 id = id,
                 merchant = draft.merchant,
@@ -2647,7 +2715,7 @@ private class ReceiptParser {
         val amount = parseAmount(lines)
         val purchasedAt = parseDate(lines) ?: LocalDate.now()
         val category = inferCategory(rawText, merchant)
-        val returnBy = purchasedAt.plusDays(defaultReturnWindow(category))
+        // Issue 3: do NOT auto-set returnByMillis — only set it via explicit user input or AI signal
         val warrantyUntil = if (category in setOf("Electronics", "Home", "Business")) {
             purchasedAt.plusYears(1)
         } else {
@@ -2660,7 +2728,7 @@ private class ReceiptParser {
             purchasedAtMillis = purchasedAt.toMillis(),
             category = category,
             location = inferLocation(lines),
-            returnByMillis = returnBy.toMillis(),
+            returnByMillis = null,
             warrantyUntilMillis = warrantyUntil?.toMillis(),
             notes = if (rawText.isBlank()) "Manual review needed" else "OCR processed"
         )
@@ -2680,10 +2748,10 @@ private class ReceiptParser {
             ?.let { (it * 100).roundToLong() }
             ?: local.amountCents
 
+        // Issue 3: only set returnBy when the AI explicitly signals a return window
         val returnBy = ai.returnWindowDays
-            ?.takeIf { it in 0..365 }
+            ?.takeIf { it in 1..365 }
             ?.let { purchasedAt.plusDays(it.toLong()).toMillis() }
-            ?: local.returnByMillis
 
         val warrantyUntil = if (ai.warrantyCandidate) {
             purchasedAt.plusYears(1).toMillis()
@@ -2759,15 +2827,6 @@ private class ReceiptParser {
             listOf("office", "staples", "invoice", "client", "business").any { text.contains(it) } -> "Business"
             listOf("target", "amazon", "store").any { text.contains(it) } -> "Shopping"
             else -> "Uncategorized"
-        }
-    }
-
-    private fun defaultReturnWindow(category: String): Long {
-        return when (category) {
-            "Electronics" -> 30
-            "Home" -> 90
-            "Business" -> 30
-            else -> 30
         }
     }
 

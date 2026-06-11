@@ -43,7 +43,7 @@ enum class ReceiptVaultBillingProduct(
         fallbackPrice = "\$4.99",
         cadence = "Monthly",
         plan = ReceiptVaultPlan.Plus,
-        description = "R2 backup, 3 email accounts, 250 email imports monthly, and unlimited warranties."
+        description = "Cloud backup, 3 email accounts, 250 email imports monthly, and unlimited warranties."
     ),
     PlusYearly(
         productId = "receiptvault_plus_yearly",
