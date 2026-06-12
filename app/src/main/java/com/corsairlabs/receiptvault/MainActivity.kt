@@ -75,6 +75,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -90,6 +92,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -143,6 +146,7 @@ import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.util.Currency
@@ -924,23 +928,17 @@ private fun SearchScreen(
             if (dateFilter == SearchDateFilter.Custom) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
+                        DateInputField(
                             value = customStartDate,
                             onValueChange = { customStartDate = it },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("From") },
-                            placeholder = { Text("YYYY-MM-DD") },
-                            leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
-                            singleLine = true
+                            label = "From"
                         )
-                        OutlinedTextField(
+                        DateInputField(
                             value = customEndDate,
                             onValueChange = { customEndDate = it },
                             modifier = Modifier.fillMaxWidth(),
-                            label = { Text("To") },
-                            placeholder = { Text("YYYY-MM-DD") },
-                            leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
-                            singleLine = true
+                            label = "To"
                         )
                     }
                 }
@@ -1758,13 +1756,12 @@ private fun ReceiptEditCard(
                     singleLine = true
                 )
             }
-            OutlinedTextField(
+            DateInputField(
                 value = state.purchaseDate,
                 onValueChange = { onStateChange(state.copy(purchaseDate = it)) },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Purchase date") },
-                placeholder = { Text("YYYY-MM-DD") },
-                singleLine = true
+                label = "Purchase date",
+                required = true
             )
             OutlinedTextField(
                 value = state.category,
@@ -1773,24 +1770,18 @@ private fun ReceiptEditCard(
                 label = { Text("Category") },
                 singleLine = true
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = state.returnByDate,
-                    onValueChange = { onStateChange(state.copy(returnByDate = it)) },
-                    modifier = Modifier.weight(1f),
-                    label = { Text("Return by") },
-                    placeholder = { Text("Blank for none") },
-                    singleLine = true
-                )
-                OutlinedTextField(
-                    value = state.warrantyUntilDate,
-                    onValueChange = { onStateChange(state.copy(warrantyUntilDate = it)) },
-                    modifier = Modifier.weight(1f),
-                    label = { Text("Warranty") },
-                    placeholder = { Text("Blank for none") },
-                    singleLine = true
-                )
-            }
+            DateInputField(
+                value = state.returnByDate,
+                onValueChange = { onStateChange(state.copy(returnByDate = it)) },
+                modifier = Modifier.fillMaxWidth(),
+                label = "Return by"
+            )
+            DateInputField(
+                value = state.warrantyUntilDate,
+                onValueChange = { onStateChange(state.copy(warrantyUntilDate = it)) },
+                modifier = Modifier.fillMaxWidth(),
+                label = "Warranty"
+            )
             if (error.isNotBlank()) {
                 Text(error, color = Coral, style = MaterialTheme.typography.bodySmall)
             }
@@ -1811,6 +1802,61 @@ private fun ReceiptEditCard(
                     Text("Save")
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateInputField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String,
+    required: Boolean = false
+) {
+    var showPicker by rememberSaveable { mutableStateOf(false) }
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onValueChange(it.filterDateInput()) },
+        modifier = modifier,
+        label = { Text(label) },
+        placeholder = { Text(if (required) "YYYY-MM-DD" else "YYYY-MM-DD or blank") },
+        supportingText = { Text("Format: YYYY-MM-DD") },
+        trailingIcon = {
+            IconButton(onClick = { showPicker = true }) {
+                Icon(Icons.Default.DateRange, contentDescription = "Select $label")
+            }
+        },
+        singleLine = true
+    )
+
+    if (showPicker) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = value.toDatePickerMillisOrNull()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { millis ->
+                            onValueChange(millis.toIsoDateFromDatePicker())
+                        }
+                        showPicker = false
+                    }
+                ) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = pickerState)
         }
     }
 }
@@ -2822,15 +2868,30 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun connectEmailProvider(provider: EmailProvider) {
-        val result = connectorStore.connect(provider)
-        _emailAccounts.value = result.accounts
-        _message.value = result.message
+        if (!connectorStore.canAddAccount()) {
+            val plan = connectorStore.currentPlan()
+            _message.value = "${plan.label} allows ${plan.maxEmailAccounts} connected email account."
+            return
+        }
+        _isBusy.value = true
         viewModelScope.launch {
-            val authorizationUrl = connectorClient.startOAuth(provider)
-            if (authorizationUrl != null) {
-                _pendingExternalUrl.value = authorizationUrl
-            } else {
-                _message.value = "${provider.label} OAuth credentials are not configured yet."
+            try {
+                val authorizationUrl = connectorClient.startOAuth(provider)
+                if (authorizationUrl != null) {
+                    val result = connectorStore.connect(
+                        provider = provider,
+                        lastMessage = "Complete OAuth in the browser, then return to ReceiptVault."
+                    )
+                    _emailAccounts.value = result.accounts
+                    _message.value = result.message
+                    _pendingExternalUrl.value = authorizationUrl
+                } else {
+                    _message.value = "${provider.label} OAuth did not return an authorization URL."
+                }
+            } catch (error: Exception) {
+                _message.value = "${provider.label} connector setup failed: ${error.message ?: "unknown error"}"
+            } finally {
+                _isBusy.value = false
             }
         }
     }
@@ -2924,7 +2985,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 updateBackgroundSyncSchedule()
             } catch (error: Exception) {
                 val detail = error.message?.takeIf { it.isNotBlank() } ?: "unknown backend error"
-                val result = connectorStore.markSyncReady(id, message = "Could not reach connector sync: $detail.")
+                val result = connectorStore.markSyncFailed(id, message = "Could not reach connector sync: $detail.")
                 _emailAccounts.value = result.accounts
                 _message.value = result.message
             } finally {
@@ -3684,6 +3745,22 @@ private fun openEmailUrl(context: Context, emailUrl: String) {
         addCategory(Intent.CATEGORY_BROWSABLE)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
+    if (uri.host.orEmpty().equals("mail.google.com", ignoreCase = true)) {
+        val browserPackages = listOf(
+            "com.android.chrome",
+            "com.chrome.beta",
+            "com.microsoft.emmx",
+            "org.mozilla.firefox"
+        )
+        for (browserPackage in browserPackages) {
+            try {
+                context.startActivity(Intent(intent).setPackage(browserPackage))
+                return
+            } catch (_: Exception) {
+                // Try the next installed browser, then fall back to the chooser.
+            }
+        }
+    }
     try {
         context.startActivity(Intent.createChooser(intent, "Open original email").apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -3705,7 +3782,16 @@ private fun emailLinkCandidates(emailUrl: String): List<Uri> {
         "mail.yahoo.com"
     ).any { host == it || host.endsWith(".$it") }
     if (!allowedHost) return emptyList()
-    return listOf(uri)
+    val candidates = mutableListOf<Uri>()
+    if (host == "mail.google.com") {
+        val account = uri.getQueryParameter("authuser").orEmpty()
+        val fragment = uri.fragment.orEmpty()
+        if (account.isNotBlank() && fragment.isNotBlank()) {
+            candidates.add(Uri.parse("https://mail.google.com/mail/u/${Uri.encode(account)}/#$fragment"))
+        }
+    }
+    candidates.add(uri)
+    return candidates.distinct()
 }
 
 private fun createCameraUri(context: Context): Uri {
@@ -3761,7 +3847,7 @@ private fun Intent.originalEmailUrl(): String? {
         .findAll(text)
         .map { it.value.trimEnd('.', ',', ')', ']') }
         .firstOrNull { url ->
-            listOf("mail.google.com", "outlook.live.com", "outlook.office.com", "mail.yahoo.com")
+            listOf("mail.google.com", "outlook.live.com", "outlook.office.com", "outlook.office365.com", "mail.yahoo.com")
                 .any { host -> url.contains(host, ignoreCase = true) }
         }
 }
@@ -3784,17 +3870,31 @@ private fun LocalDate.toMillis(): Long {
     return atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 }
 
+private fun String.filterDateInput(): String =
+    filter { it.isDigit() || it == '-' }.take(10)
+
+private fun String.toDatePickerMillisOrNull(): Long? =
+    toLocalDateOrNull()
+        ?.atStartOfDay(ZoneOffset.UTC)
+        ?.toInstant()
+        ?.toEpochMilli()
+
+private fun Long.toIsoDateFromDatePicker(): String =
+    Instant.ofEpochMilli(this)
+        .atZone(ZoneOffset.UTC)
+        .toLocalDate()
+        .toString()
+
 private fun todayMillis(): Long = LocalDate.now().toMillis()
 
 private fun formatReceiptTotal(receipts: List<Receipt>): String {
     if (receipts.isEmpty()) return formatCurrency(0, defaultCurrencyCode())
     val totals = receipts.groupBy { normalizeCurrencyCode(it.currencyCode) ?: defaultCurrencyCode() }
         .mapValues { (_, values) -> values.sumOf { it.amountCents } }
-    if (totals.size == 1) {
-        val (currencyCode, cents) = totals.entries.first()
-        return formatCurrency(cents, currencyCode)
+        .toSortedMap()
+    return totals.entries.joinToString("\n") { (currencyCode, cents) ->
+        formatCurrency(cents, currencyCode)
     }
-    return "${totals.size} currencies"
 }
 
 private fun formatCurrency(cents: Long, currencyCode: String = defaultCurrencyCode()): String {

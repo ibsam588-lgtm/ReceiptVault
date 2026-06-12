@@ -82,6 +82,7 @@ type StoredConnectorMetadata = {
   label?: string;
   scope?: string;
   storedAt?: string;
+  lastSuccessfulSyncAt?: string;
   emailAddress?: string;
   host?: string;
   port?: number;
@@ -755,15 +756,17 @@ async function storeConnectorToken(
   const tokenSet = tokenSetWithExpiry(tokens);
   const encrypted = await encryptJson(tokenSet, env.CONNECTOR_TOKEN_ENCRYPTION_KEY);
   const key = connectorTokenObjectName(userId, provider.id);
-  // Preserve a previously stored email address (e.g. on token refresh) when no new one is supplied.
-  const existingEmail = emailAddress ? null : (await readConnectorMetadata(env, userId, provider.id))?.emailAddress;
+  const existingMetadata = await readConnectorMetadata(env, userId, provider.id);
+  // Preserve metadata such as the email address and sync cursor when refreshing tokens.
+  const existingEmail = emailAddress ? null : existingMetadata?.emailAddress;
   await env.RECEIPTS_BUCKET.put(key, JSON.stringify({
     provider: provider.id,
     label: provider.label,
     scope: provider.scope,
-    storedAt: new Date().toISOString(),
+    storedAt: existingMetadata?.storedAt || new Date().toISOString(),
     expiresAt: tokenSet.expiresAt || null,
     emailAddress: emailAddress || existingEmail || null,
+    lastSuccessfulSyncAt: existingMetadata?.lastSuccessfulSyncAt || null,
     encrypted
   }), {
     httpMetadata: { contentType: "application/json" }
@@ -938,33 +941,21 @@ async function syncProviderForUser(
 
   try {
     if (providerId === "imap") {
-      return {
-        ok: true,
-        provider: providerId,
-        status: "imap_settings_ready",
+      return syncUnavailable(
+        providerId,
         syncedAt,
-        scanned: 0,
-        candidates: 0,
-        imported: 0,
-        matchedSignals: [],
-        message: "Manual IMAP settings are stored encrypted. Full IMAP message polling requires the provider-specific IMAP fetch worker before import.",
+        "Manual IMAP settings are stored encrypted, but live IMAP mailbox polling is not available in this Worker build.",
         plan
-      };
+      );
     }
 
     if (providerId === "yahoo") {
-      return {
-        ok: true,
-        provider: providerId,
-        status: "yahoo_oauth_ready",
+      return syncUnavailable(
+        providerId,
         syncedAt,
-        scanned: 0,
-        candidates: 0,
-        imported: 0,
-        matchedSignals: [],
-        message: "Yahoo OAuth is connected. Yahoo receipt import will use the IMAP fetch worker after provider-specific mailbox polling is enabled.",
+        "Yahoo OAuth is connected, but live Yahoo mailbox polling is not available in this Worker build.",
         plan
-      };
+      );
     }
 
     const provider = providerConfig(providerId, env);
@@ -978,9 +969,10 @@ async function syncProviderForUser(
     const refreshed = await ensureAccessToken(env, userId, provider, tokens);
     if (!refreshed.access_token) return syncError(providerId, syncedAt, "missing_access_token");
 
+    const sinceIso = connectorSyncSince(metadata);
     const candidates = providerId === "gmail"
-      ? await fetchGmailCandidates(provider, refreshed.access_token, maxCandidates, paginate, metadata.emailAddress)
-      : await fetchOutlookCandidates(provider, refreshed.access_token, maxCandidates);
+      ? await fetchGmailCandidates(provider, refreshed.access_token, maxCandidates, paginate, metadata.emailAddress, sinceIso)
+      : await fetchOutlookCandidates(provider, refreshed.access_token, maxCandidates, sinceIso);
     const receiptCandidates = candidates
       .filter((candidate) => !isExcludedSender(candidate.from))
       .map((candidate) => ({
@@ -1056,6 +1048,7 @@ async function syncProviderForUser(
       );
       importedReceipts.push(receipt);
     }
+    await updateConnectorLastSuccessfulSyncAt(env, userId, providerId, syncedAt);
 
     return {
       ok: true,
@@ -1094,6 +1087,27 @@ function syncError(provider: ConnectorProviderId, syncedAt: string, error: strin
   };
 }
 
+function syncUnavailable(
+  provider: ConnectorProviderId,
+  syncedAt: string,
+  message: string,
+  plan: EffectivePlan
+): ConnectorSyncReport {
+  return {
+    ok: false,
+    provider,
+    status: "sync_unavailable",
+    syncedAt,
+    scanned: 0,
+    candidates: 0,
+    imported: 0,
+    matchedSignals: [],
+    message,
+    error: "provider_sync_not_implemented",
+    plan
+  };
+}
+
 async function readConnectorMetadata(
   env: Env,
   userId: string,
@@ -1102,6 +1116,29 @@ async function readConnectorMetadata(
   const object = await env.RECEIPTS_BUCKET.get(connectorTokenObjectName(userId, provider));
   if (!object) return null;
   return object.json<StoredConnectorMetadata>().catch(() => null);
+}
+
+function connectorSyncSince(metadata: StoredConnectorMetadata): string | undefined {
+  const value = metadata.lastSuccessfulSyncAt || metadata.storedAt;
+  if (!value) return undefined;
+  const millis = Date.parse(value);
+  return Number.isNaN(millis) ? undefined : new Date(millis).toISOString();
+}
+
+async function updateConnectorLastSuccessfulSyncAt(
+  env: Env,
+  userId: string,
+  provider: ConnectorProviderId,
+  syncedAt: string
+): Promise<void> {
+  const metadata = await readConnectorMetadata(env, userId, provider);
+  if (!metadata) return;
+  await env.RECEIPTS_BUCKET.put(connectorTokenObjectName(userId, provider), JSON.stringify({
+    ...metadata,
+    lastSuccessfulSyncAt: syncedAt
+  }), {
+    httpMetadata: { contentType: "application/json" }
+  });
 }
 
 async function ensureAccessToken(
@@ -1154,14 +1191,15 @@ async function fetchGmailCandidates(
   accessToken: string,
   maxCandidates: number,
   paginate = false,
-  accountEmail?: string
+  accountEmail?: string,
+  sinceIso?: string
 ): Promise<ProviderMessageCandidate[]> {
   const candidates: ProviderMessageCandidate[] = [];
   let pageToken: string | undefined;
 
   do {
     const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-    listUrl.searchParams.set("q", provider.query);
+    listUrl.searchParams.set("q", gmailQuerySince(provider.query, sinceIso));
     listUrl.searchParams.set("maxResults", String(Math.min(50, maxCandidates - candidates.length)));
     if (pageToken) listUrl.searchParams.set("pageToken", pageToken);
 
@@ -1189,6 +1227,7 @@ async function fetchGmailCandidates(
       const headers = gmailHeaders(detail);
       const threadId = typeof detail.threadId === "string" ? detail.threadId : id;
       const rfc822MessageId = typeof headers["Message-ID"] === "string" ? headers["Message-ID"] : "";
+      if (!isMessageAfterSince(headers.Date, sinceIso)) continue;
       const webUrl = gmailWebUrl(accountEmail, threadId, rfc822MessageId);
       candidates.push({
         id,
@@ -1209,9 +1248,25 @@ async function fetchGmailCandidates(
   return candidates;
 }
 
+function gmailQuerySince(baseQuery: string, sinceIso?: string): string {
+  if (!sinceIso) return baseQuery;
+  const millis = Date.parse(sinceIso);
+  if (Number.isNaN(millis)) return baseQuery;
+  const date = new Date(millis).toISOString().slice(0, 10).replace(/-/g, "/");
+  return `${baseQuery} after:${date}`;
+}
+
+function isMessageAfterSince(messageDate: string | undefined, sinceIso?: string): boolean {
+  if (!sinceIso) return true;
+  const sinceMs = Date.parse(sinceIso);
+  if (Number.isNaN(sinceMs)) return true;
+  const messageMs = Date.parse(messageDate || "");
+  return !Number.isNaN(messageMs) && messageMs > sinceMs;
+}
+
 function gmailWebUrl(accountEmail: string | undefined, threadId: string, rfc822MessageId?: string): string {
   const base = accountEmail
-    ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(accountEmail)}`
+    ? `https://mail.google.com/mail/u/${encodeURIComponent(accountEmail)}/`
     : "https://mail.google.com/mail/u/0/";
   const cleanMessageId = (rfc822MessageId || "").trim().replace(/^<|>$/g, "");
   if (cleanMessageId) {
@@ -1352,12 +1407,14 @@ function gmailHeaders(detail: Record<string, unknown>): Record<string, string> {
 async function fetchOutlookCandidates(
   _provider: OAuthProviderConfig,
   accessToken: string,
-  maxCandidates: number
+  maxCandidates: number,
+  sinceIso?: string
 ): Promise<ProviderMessageCandidate[]> {
   const searchUrl = new URL("https://graph.microsoft.com/v1.0/me/messages");
   searchUrl.searchParams.set("$top", String(maxCandidates));
-  searchUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments,webLink");
-  searchUrl.searchParams.set("$search", "\"receipt OR order OR invoice OR purchase confirmation OR warranty OR bill OR statement\"");
+  searchUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments,webLink,internetMessageId");
+  searchUrl.searchParams.set("$orderby", "receivedDateTime desc");
+  if (sinceIso) searchUrl.searchParams.set("$filter", `receivedDateTime gt ${sinceIso}`);
 
   let response = await fetch(searchUrl, {
     headers: { authorization: `Bearer ${accessToken}` }
@@ -1366,7 +1423,7 @@ async function fetchOutlookCandidates(
   if (!response.ok) {
     const fallbackUrl = new URL("https://graph.microsoft.com/v1.0/me/messages");
     fallbackUrl.searchParams.set("$top", String(maxCandidates));
-    fallbackUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments,webLink");
+    fallbackUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments,webLink,internetMessageId");
     fallbackUrl.searchParams.set("$orderby", "receivedDateTime desc");
     response = await fetch(fallbackUrl, {
       headers: { authorization: `Bearer ${accessToken}` }
@@ -1375,21 +1432,33 @@ async function fetchOutlookCandidates(
 
   if (!response.ok) throw new Error(`outlook_list_failed:${response.status}`);
   const body = await response.json<Record<string, unknown>>();
-  const values = Array.isArray(body.value) ? body.value.filter(isRecord).slice(0, maxCandidates) : [];
+  const values = Array.isArray(body.value)
+    ? body.value.filter(isRecord).filter((message) => {
+      const received = typeof message.receivedDateTime === "string" ? message.receivedDateTime : "";
+      return isMessageAfterSince(received, sinceIso);
+    }).slice(0, maxCandidates)
+    : [];
   return values.map((message) => {
     const from = isRecord(message.from) && isRecord(message.from.emailAddress)
       ? String(message.from.emailAddress.address || message.from.emailAddress.name || "")
       : "";
+    const id = typeof message.id === "string" ? message.id : crypto.randomUUID();
+    const internetMessageId = typeof message.internetMessageId === "string" ? message.internetMessageId : "";
     return {
-      id: typeof message.id === "string" ? message.id : crypto.randomUUID(),
+      id,
       subject: typeof message.subject === "string" ? message.subject : "",
       from,
       date: typeof message.receivedDateTime === "string" ? message.receivedDateTime : "",
       snippet: typeof message.bodyPreview === "string" ? message.bodyPreview : "",
       hasAttachments: message.hasAttachments === true,
-      webUrl: typeof message.webLink === "string" ? message.webLink : undefined
+      webUrl: typeof message.webLink === "string" ? message.webLink : outlookWebUrl(id),
+      rfc822MessageId: internetMessageId
     };
   });
+}
+
+function outlookWebUrl(messageId: string): string {
+  return `https://outlook.live.com/mail/0/inbox/id/${encodeURIComponent(messageId)}`;
 }
 
 function candidateText(candidate: ProviderMessageCandidate): string {

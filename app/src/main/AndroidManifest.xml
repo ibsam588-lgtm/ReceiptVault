@@ -5,8 +5,12 @@
     <!-- Package visibility (Android 11+): needed so getLaunchIntentForPackage can
          resolve the native email apps when opening the original receipt email. -->
     <queries>
+        <package android:name="com.android.chrome" />
+        <package android:name="com.chrome.beta" />
         <package android:name="com.google.android.gm" />
+        <package android:name="com.microsoft.emmx" />
         <package android:name="com.microsoft.office.outlook" />
+        <package android:name="org.mozilla.firefox" />
     </queries>
 
     <application

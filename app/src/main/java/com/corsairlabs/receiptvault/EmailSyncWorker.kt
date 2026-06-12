@@ -69,9 +69,16 @@ class EmailSyncWorker(
                     imported = importedNow,
                     message = syncMessage
                 )
-            } catch (_: Exception) {
-                // Not signed in, offline, or backend error — retry on the next interval.
-                failures++
+            } catch (error: Exception) {
+                // Transient sync failures retry on the next interval; product limitations do not.
+                val detail = error.message?.takeIf { it.isNotBlank() } ?: "unknown backend error"
+                connectorStore.markSyncFailed(
+                    id = account.id,
+                    message = "Could not reach connector sync: $detail."
+                )
+                if (!detail.contains("not available in this build", ignoreCase = true)) {
+                    failures++
+                }
             }
         }
 

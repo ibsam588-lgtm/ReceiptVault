@@ -24,10 +24,8 @@ class EmailConnectorClient {
     private val apiBase = BuildConfig.R2_BACKUP_API_URL
 
     suspend fun startOAuth(provider: EmailProvider): String? {
-        return runCatching {
-            val token = firebaseToken()
-            postStart(token, provider)
-        }.getOrNull()
+        val token = firebaseToken()
+        return postStart(token, provider)
     }
 
     suspend fun deleteAccount(provider: EmailProvider): Boolean {
@@ -143,6 +141,14 @@ class EmailConnectorClient {
 
         val reports = JSONObject(response).optJSONArray("reports")
         val report = reports?.optJSONObject(0)
+            ?: throw IOException("connector sync returned no report")
+        val ok = report.optBoolean("ok", false)
+        val status = report.optString("status", "")
+        val apiError = report.optString("error", "")
+        val message = report.optString("message", "Receipt-only sync check completed.")
+        if (!ok) {
+            throw IOException(connectorReportErrorMessage(apiError, message))
+        }
         val receiptsArray = report?.optJSONArray("receipts")
         val receiptsList = buildList {
             if (receiptsArray != null) {
@@ -152,10 +158,13 @@ class EmailConnectorClient {
             }
         }
         ConnectorSyncSummary(
-            scanned = report?.optInt("scanned", 0) ?: 0,
-            candidates = report?.optInt("candidates", 0) ?: 0,
-            imported = report?.optInt("imported", 0) ?: 0,
-            message = report?.optString("message", "Receipt-only sync check completed.") ?: "Receipt-only sync check completed.",
+            scanned = report.optInt("scanned", 0),
+            candidates = report.optInt("candidates", 0),
+            imported = report.optInt("imported", 0),
+            message = message,
+            ok = ok,
+            status = status,
+            error = apiError,
             receipts = receiptsList
         )
     }
@@ -225,7 +234,21 @@ class EmailConnectorClient {
             "connector_encryption_not_configured" -> "connector encryption secret is missing on the Worker"
             "unauthorized" -> "Firebase sign-in was not accepted"
             "plus_required" -> "Plus subscription is required for cloud sync"
+            "missing_oauth_token" -> "OAuth token is missing. Disconnect and reconnect this email account."
+            "missing_access_token" -> "OAuth access token is missing. Disconnect and reconnect this email account."
+            "provider_sync_not_implemented" -> "Live sync for this email provider is not available in this build."
             else -> apiError ?: "HTTP $statusCode"
+        }
+    }
+
+    private fun connectorReportErrorMessage(apiError: String, message: String): String {
+        return when (apiError) {
+            "provider_not_configured" -> "OAuth provider is not configured on the Worker"
+            "connector_encryption_not_configured" -> "connector encryption secret is missing on the Worker"
+            "missing_oauth_token" -> "OAuth token is missing. Disconnect and reconnect this email account."
+            "missing_access_token" -> "OAuth access token is missing. Disconnect and reconnect this email account."
+            "provider_sync_not_implemented" -> "Live sync for this email provider is not available in this build."
+            else -> apiError.ifBlank { message.ifBlank { "connector sync failed" } }
         }
     }
 }

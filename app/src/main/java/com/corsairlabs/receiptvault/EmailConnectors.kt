@@ -106,6 +106,9 @@ data class ConnectorSyncSummary(
     val candidates: Int,
     val imported: Int,
     val message: String,
+    val ok: Boolean = true,
+    val status: String = "",
+    val error: String = "",
     val receipts: List<org.json.JSONObject> = emptyList()
 )
 
@@ -179,6 +182,25 @@ class EmailConnectorStore(private val context: Context) {
                     } else {
                         message
                     }
+                )
+            } else {
+                account
+            }
+        }
+        saveAccounts(updated)
+        return ConnectorStoreResult(updated, message)
+    }
+
+    fun markSyncFailed(
+        id: String,
+        message: String
+    ): ConnectorStoreResult {
+        val updated = loadAccounts().map { account ->
+            if (account.id == id) {
+                account.copy(
+                    status = if (account.status == ConnectorStatus.Disconnected) account.status else ConnectorStatus.Ready,
+                    lastSyncMillis = System.currentTimeMillis(),
+                    lastMessage = message
                 )
             } else {
                 account
