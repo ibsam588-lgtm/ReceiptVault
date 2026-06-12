@@ -1021,6 +1021,7 @@ async function syncProviderForUser(
       // Use bodyText only in memory for extraction — do NOT persist raw email content
       const receipt: Record<string, unknown> = {
         id: receiptId,
+        emailMessageId: receiptId,
         merchant,
         amountCents,
         purchasedAtMillis: Number.isNaN(purchasedAtMs) ? Date.now() : purchasedAtMs,

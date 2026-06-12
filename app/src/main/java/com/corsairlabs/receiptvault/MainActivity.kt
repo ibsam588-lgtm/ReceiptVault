@@ -2616,10 +2616,17 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             try {
                 val summary = connectorClient.syncProvider(account.provider)
-                // Upsert any receipts returned by the Worker into local storage
+                // Import receipts returned by the Worker, skipping emails imported on a
+                // previous sync — a blind upsert would resurrect deleted receipts and
+                // overwrite local edits with the server copy on every sync.
                 for (receiptJson in summary.receipts) {
                     runCatching {
-                        _receipts.value = store.upsert(Receipt.fromJson(receiptJson))
+                        val receipt = Receipt.fromJson(receiptJson)
+                        val emailKey = receipt.emailMessageId ?: receipt.id
+                        if (!store.isEmailImported(emailKey)) {
+                            _receipts.value = store.upsert(receipt)
+                            store.markEmailImported(emailKey)
+                        }
                     }
                 }
                 val result = connectorStore.markSyncReady(
@@ -2790,6 +2797,19 @@ internal class ReceiptStore(private val context: Context) {
             .sortedByDescending { it.purchasedAtMillis }
         prefs.edit().putString("receipts", JSONArray(updated.map { it.toJson() }).toString()).apply()
         return updated
+    }
+
+    // Email messages stay recorded once imported so a receipt the user deleted
+    // (or edited) is not re-imported/overwritten by every subsequent connector sync.
+    @Synchronized
+    fun isEmailImported(emailId: String): Boolean =
+        prefs.getStringSet("imported_email_ids", emptySet())?.contains(emailId) == true
+
+    @Synchronized
+    fun markEmailImported(emailId: String) {
+        val ids = (prefs.getStringSet("imported_email_ids", emptySet()) ?: emptySet()).toMutableSet()
+        ids.add(emailId)
+        prefs.edit().putStringSet("imported_email_ids", ids).apply()
     }
 
     @Synchronized
@@ -3215,7 +3235,8 @@ data class Receipt(
     val rawText: String,
     val imagePath: String,
     val source: ImportSource,
-    val emailUrl: String? = null
+    val emailUrl: String? = null,
+    val emailMessageId: String? = null
 ) {
     val purchaseDateLabel: String get() = purchasedAtMillis.formatDate()
     val returnByLabel: String get() = returnByMillis?.formatDate() ?: "Not set"
@@ -3235,6 +3256,7 @@ data class Receipt(
         .put("imagePath", imagePath)
         .put("source", source.name)
         .put("emailUrl", emailUrl ?: "")
+        .put("emailMessageId", emailMessageId ?: "")
 
     companion object {
         fun fromJson(json: JSONObject): Receipt = Receipt(
@@ -3251,7 +3273,8 @@ data class Receipt(
             rawText = json.optString("rawText", ""),
             imagePath = json.optString("imagePath", ""),
             source = runCatching { ImportSource.valueOf(json.optString("source", ImportSource.Image.name)) }.getOrDefault(ImportSource.Image),
-            emailUrl = json.optString("emailUrl", "").takeIf { it.isNotBlank() }
+            emailUrl = json.optString("emailUrl", "").takeIf { it.isNotBlank() },
+            emailMessageId = json.optString("emailMessageId", "").takeIf { it.isNotBlank() }
         )
     }
 }

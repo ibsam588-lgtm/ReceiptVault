@@ -43,8 +43,17 @@ class EmailSyncWorker(
         for (account in accounts) {
             try {
                 val summary = connectorClient.syncProvider(account.provider)
+                // Skip emails imported on a previous sync (same dedup as the manual
+                // sync path) so background syncs don't resurrect deleted receipts.
                 for (receiptJson in summary.receipts) {
-                    runCatching { receiptStore.upsert(Receipt.fromJson(receiptJson)) }
+                    runCatching {
+                        val receipt = Receipt.fromJson(receiptJson)
+                        val emailKey = receipt.emailMessageId ?: receipt.id
+                        if (!receiptStore.isEmailImported(emailKey)) {
+                            receiptStore.upsert(receipt)
+                            receiptStore.markEmailImported(emailKey)
+                        }
+                    }
                 }
                 connectorStore.markSyncReady(
                     id = account.id,
