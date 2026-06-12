@@ -43,7 +43,8 @@ email connectors must be disclosed when they are enabled in a release.
 
 ## Play Store Requirements To Finish
 
-- Publish a Corsair Labs privacy policy URL before production release.
+- Use the live Corsair Labs privacy policy URL:
+  `https://corsairlabs.com/receiptvault-privacy-policy`.
 - Confirm whether future cloud sync, email forwarding, analytics, or billing
   changes data collection.
 - Complete Play Console Data Safety using the final production behavior, not

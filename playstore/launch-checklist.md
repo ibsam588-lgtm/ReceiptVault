@@ -5,9 +5,9 @@
 - Add app signing key and generate a release bundle.
 - Add store listing copy from `listing-en-US.md`.
 - Upload store graphics from `graphics/` and screenshots from `screenshots/phone/`.
-- Add privacy policy URL under the Corsair Labs or Firebase Hosting URL.
+- Add privacy policy URL under the Corsair Labs URL.
 - Privacy policy URL is live:
-  `https://receiptvault-corsair.web.app/privacy/receiptvault/`.
+  `https://corsairlabs.com/receiptvault-privacy-policy`.
 - Complete Data Safety using `data-safety-notes.md`.
 - Complete content rating questionnaire and target audience forms.
 - Complete the Advertising ID declaration. The Android manifest and dependency
