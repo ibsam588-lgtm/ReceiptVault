@@ -844,7 +844,9 @@ private fun SearchScreen(
                 receipt.category,
                 receipt.location,
                 receipt.notes,
-                receipt.rawText
+                receipt.rawText,
+                formatCurrency(receipt.amountCents),
+                receipt.purchaseDateLabel
             ).joinToString(" ").lowercase(Locale.US)
             haystack.contains(query.lowercase(Locale.US))
         }
@@ -3297,29 +3299,36 @@ enum class AppScreen(val title: String, val navLabel: String) {
 }
 
 private fun openEmailUrl(context: Context, emailUrl: String) {
-    // For Gmail URLs, try to open in the Gmail app directly (not a browser).
-    if (emailUrl.contains("mail.google.com")) {
+    val nativePackage = when {
+        emailUrl.contains("mail.google.com") -> "com.google.android.gm"
+        emailUrl.contains("outlook.live.com") || emailUrl.contains("outlook.office.com") -> "com.microsoft.office.outlook"
+        else -> null
+    }
+    if (nativePackage != null) {
+        // First try handing the URL to the native app directly.
         try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
-                setPackage("com.google.android.gm")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
+                    setPackage(nativePackage)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
             return
         } catch (_: Exception) {}
-    }
-    // For Outlook URLs, try the Outlook app.
-    if (emailUrl.contains("outlook.live.com") || emailUrl.contains("outlook.office.com")) {
+        // Gmail has no intent filter for https://mail.google.com URLs (and the
+        // googlegmail:// scheme is iOS-only), so the VIEW intent above cannot
+        // resolve. Open the app itself — landing in the inbox beats the desktop
+        // web UI in a browser tab. Requires the <queries> entries in the manifest.
         try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
-                setPackage("com.microsoft.office.outlook")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val launch = context.packageManager.getLaunchIntentForPackage(nativePackage)
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launch)
+                return
             }
-            context.startActivity(intent)
-            return
         } catch (_: Exception) {}
     }
-    // Fallback: open in any available handler.
+    // Last resort: any available handler (browser).
     try {
         context.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
