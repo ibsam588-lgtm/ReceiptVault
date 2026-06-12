@@ -852,6 +852,8 @@ private fun SearchScreen(
     val filtered = remember(query, receipts, dateFilter, customStartDate, customEndDate) {
         receipts.searchReceipts(query).filterByPurchasedDate(dateFilter, customStartDate, customEndDate)
     }
+    val filteredIds = remember(filtered) { filtered.map { it.id }.toSet() }
+    val allVisibleSelected = filteredIds.isNotEmpty() && filteredIds.all { it in selectedIds }
     val categories = remember(receipts) {
         receipts.map { it.category }
             .filter { it.isNotBlank() }
@@ -874,7 +876,7 @@ private fun SearchScreen(
                 start = 18.dp,
                 end = 18.dp,
                 top = 18.dp,
-                bottom = if (inSelectMode) 96.dp else 18.dp
+                bottom = if (inSelectMode) 148.dp else 18.dp
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -966,22 +968,25 @@ private fun SearchScreen(
                     ) {
                         // No inner onClick: the wrapping Box's combinedClickable handles
                         // tap and long-press; an inner clickable would swallow both.
-                        ReceiptRow(receipt)
-                        if (inSelectMode) {
-                            Checkbox(
-                                checked = receipt.id in selectedIds,
-                                onCheckedChange = { checked ->
-                                    selectedIds = if (checked) {
-                                        selectedIds + receipt.id
-                                    } else {
-                                        selectedIds - receipt.id
-                                    }
-                                },
-                                modifier = Modifier
-                                    .align(Alignment.CenterEnd)
-                                    .padding(end = 8.dp)
-                            )
-                        }
+                        ReceiptRow(
+                            receipt = receipt,
+                            trailingContent = if (inSelectMode) {
+                                {
+                                    Checkbox(
+                                        checked = receipt.id in selectedIds,
+                                        onCheckedChange = { checked ->
+                                            selectedIds = if (checked) {
+                                                selectedIds + receipt.id
+                                            } else {
+                                                selectedIds - receipt.id
+                                            }
+                                        }
+                                    )
+                                }
+                            } else {
+                                null
+                            }
+                        )
                     }
                 }
             }
@@ -995,24 +1000,51 @@ private fun SearchScreen(
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    OutlinedButton(
-                        onClick = { selectedIds = emptySet() },
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Cancel") }
-                    Button(
-                        onClick = {
-                            onDeleteMultiple(selectedIds.toList())
-                            selectedIds = emptySet()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Coral),
-                        modifier = Modifier.weight(1f)
-                    ) { Text("Delete (${selectedIds.size})") }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("${selectedIds.size} selected", color = Muted, fontWeight = FontWeight.Bold)
+                        TextButton(
+                            onClick = {
+                                selectedIds = if (allVisibleSelected) {
+                                    selectedIds - filteredIds
+                                } else {
+                                    selectedIds + filteredIds
+                                }
+                            },
+                            enabled = filteredIds.isNotEmpty()
+                        ) {
+                            Text(
+                                if (allVisibleSelected) "Clear visible" else "Select all (${filteredIds.size})",
+                                color = TealDark
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { selectedIds = emptySet() },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Cancel") }
+                        Button(
+                            onClick = {
+                                onDeleteMultiple(selectedIds.toList())
+                                selectedIds = emptySet()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Coral),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Delete (${selectedIds.size})") }
+                    }
                 }
             }
         }
@@ -2117,7 +2149,11 @@ private fun SectionHeader(title: String, action: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ReceiptRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
+private fun ReceiptRow(
+    receipt: Receipt,
+    onClick: (() -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -2126,7 +2162,9 @@ private fun ReceiptRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             MerchantMark(receipt.merchant)
@@ -2136,6 +2174,15 @@ private fun ReceiptRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
                 Text("${receipt.category} - ${receipt.purchaseDateLabel}", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
             Text(formatCurrency(receipt.amountCents, receipt.currencyCode), fontWeight = FontWeight.ExtraBold)
+            if (trailingContent != null) {
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier.size(44.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    trailingContent()
+                }
+            }
         }
     }
 }
