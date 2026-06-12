@@ -231,7 +231,7 @@ The Play Console app exists and internal-track upload is handled by GitHub
 Actions when the Google Play service account secret is present. CI builds assign
 a unique Play `versionCode` from the GitHub run number so repeated internal-track
 uploads are not rejected. Play subscription products are active with monthly and
-yearly Plus/Business base plans. The Firebase privacy policy URL is live, App
+yearly Plus/Business base plans. The Corsair Labs privacy policy URL is live, App
 Content still needs the Advertising ID declaration, and public production access
 is blocked until a closed test has at least 12 opted-in testers for at least 14
 days. Gmail verification and public rollout approvals still need final Play
