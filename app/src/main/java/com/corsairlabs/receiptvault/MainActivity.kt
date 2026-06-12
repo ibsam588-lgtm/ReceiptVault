@@ -13,6 +13,7 @@ import android.graphics.Paint
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -1652,8 +1653,6 @@ private fun ReceiptDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            // Prefer opening the email in its native app (Gmail/Outlook) rather
-                            // than a browser; openEmailUrl falls back gracefully.
                             openEmailUrl(context, emailUrl)
                         },
                     shape = RoundedCornerShape(8.dp),
@@ -1911,7 +1910,7 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
 
     // Category totals
     val categoryTotals: List<Pair<String, List<Receipt>>> = receipts
-        .groupBy { it.category }
+        .groupBy { it.normalizedCategory }
         .map { (cat, items) -> cat to items }
         .sortedByDescending { (_, items) -> items.sumOf { it.amountCents } }
         .take(5)
@@ -1920,6 +1919,9 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
     val maxMonthly = monthlyData.maxOfOrNull { it.second }?.takeIf { it > 0 } ?: 1L
     val totalSpent = receipts.sumOf { it.amountCents }
     val oneCurrency = receipts.map { normalizeCurrencyCode(it.currencyCode) ?: defaultCurrencyCode() }.distinct().singleOrNull()
+    val categorizedCount = receipts.count { it.normalizedCategory != "Uncategorized" }
+    val returnDateCount = receipts.count { it.returnByMillis != null }
+    val warrantyDateCount = receipts.count { it.warrantyUntilMillis != null }
     val avgAmountLabel = if (receipts.isNotEmpty() && oneCurrency != null) {
         formatCurrency(totalSpent / receipts.size, oneCurrency)
     } else if (receipts.isEmpty()) {
@@ -1939,6 +1941,13 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
                 StatCard(Modifier.weight(1f), "Total spent", formatReceiptTotal(receipts), Teal)
                 StatCard(Modifier.weight(1f), "Avg receipt", avgAmountLabel, Coral)
                 StatCard(Modifier.weight(1f), "Receipts", receipts.size.toString(), Amber)
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatCard(Modifier.weight(1f), "Categorized", categorizedCount.toString(), VaultBlue)
+                StatCard(Modifier.weight(1f), "Returns", returnDateCount.toString(), Teal)
+                StatCard(Modifier.weight(1f), "Warranties", warrantyDateCount.toString(), Amber)
             }
         }
         item {
@@ -2097,12 +2106,23 @@ private fun TaxExportCard(receipts: List<Receipt>) {
 
 private fun buildTaxCsv(receipts: List<Receipt>): String {
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val header = "Date,Merchant,Category,Amount,Currency,Tax Amount,Notes"
+    val header = "Date,Merchant,Category,Amount,Currency,Return By,Warranty Until,Tax Amount,Notes,Metadata Pattern"
     val rows = receipts.sortedByDescending { it.purchasedAtMillis }.map { r ->
         val date = Instant.ofEpochMilli(r.purchasedAtMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(fmt)
         val amount = "%.2f".format(r.amountCents / 100.0)
         fun csvField(s: String) = "\"${s.replace("\"", "\"\"")}\""
-        listOf(date, csvField(r.merchant), csvField(r.category), amount, r.currencyCode, "", csvField(r.notes)).joinToString(",")
+        listOf(
+            date,
+            csvField(r.merchant),
+            csvField(r.normalizedCategory),
+            amount,
+            r.currencyCode,
+            r.returnByIso.orEmpty(),
+            r.warrantyUntilIso.orEmpty(),
+            "",
+            csvField(r.notes),
+            csvField(r.metadataPattern)
+        ).joinToString(",")
     }
     return (listOf(header) + rows).joinToString("\n")
 }
@@ -3329,10 +3349,7 @@ private class ImageEnhancer(private val context: Context) {
 }
 
 private class ReceiptParser {
-    private val validCategories = setOf(
-        "Groceries", "Electronics", "Home", "Business", "Shopping",
-        "Food", "Travel", "Health", "Auto", "Other", "Uncategorized"
-    )
+    private val validCategories = StandardReceiptCategories.toSet()
     private val moneyRegex = Regex("""(?i)(?:\b[A-Z]{3}\s*)?[$€£¥₹₨₺₩₽₫₪₱]?\s*([0-9]{1,6}(?:[,.][0-9]{3})*(?:[,.][0-9]{2}))""")
     private val datePatterns = listOf(
         DateTimeFormatter.ofPattern("M/d/yyyy", Locale.US),
@@ -3400,6 +3417,7 @@ private class ReceiptParser {
         val warrantyUntil = local.warrantyUntilMillis
 
         val category = ai.category
+            ?.let { normalizeReceiptCategory(it) }
             ?.takeIf { it in validCategories }
             ?: local.category
 
@@ -3527,7 +3545,7 @@ data class ReceiptEditState(
             amountCents = amountCents,
             currencyCode = normalizedCurrency,
             purchasedAtMillis = purchaseDateMillis,
-            category = category.trim().ifBlank { "Uncategorized" },
+            category = normalizeReceiptCategory(category),
             returnByMillis = returnMillis.takeIf { it > 0L },
             warrantyUntilMillis = warrantyMillis.takeIf { it > 0L }
         )
@@ -3575,8 +3593,13 @@ data class Receipt(
     val emailMessageId: String? = null
 ) {
     val purchaseDateLabel: String get() = purchasedAtMillis.formatDate()
+    val purchasedIso: String get() = purchasedAtMillis.formatIsoDate()
+    val normalizedCategory: String get() = normalizeReceiptCategory(category)
+    val returnByIso: String? get() = returnByMillis?.formatIsoDate()
+    val warrantyUntilIso: String? get() = warrantyUntilMillis?.formatIsoDate()
     val returnByLabel: String get() = returnByMillis?.formatDate() ?: "Not set"
     val warrantyLabel: String get() = warrantyUntilMillis?.formatDate() ?: "Not set"
+    val metadataPattern: String get() = receiptMetadataPattern(this)
 
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -3584,10 +3607,11 @@ data class Receipt(
         .put("amountCents", amountCents)
         .put("currencyCode", currencyCode)
         .put("purchasedAtMillis", purchasedAtMillis)
-        .put("category", category)
+        .put("category", normalizedCategory)
         .put("location", location)
         .put("returnByMillis", returnByMillis)
         .put("warrantyUntilMillis", warrantyUntilMillis)
+        .put("metadataPattern", metadataPattern)
         .put("notes", notes)
         .put("rawText", rawText)
         .put("imagePath", imagePath)
@@ -3603,7 +3627,7 @@ data class Receipt(
             amountCents = json.optLong("amountCents", 0),
             currencyCode = normalizeCurrencyCode(json.optString("currencyCode", "")) ?: defaultCurrencyCode(),
             purchasedAtMillis = json.optLong("purchasedAtMillis", todayMillis()),
-            category = json.optString("category", "Uncategorized"),
+            category = normalizeReceiptCategory(json.optString("category", "Uncategorized")),
             location = json.optString("location", "Location not detected"),
             returnByMillis = json.nullableLong("returnByMillis"),
             warrantyUntilMillis = json.nullableLong("warrantyUntilMillis"),
@@ -3655,15 +3679,33 @@ private enum class SearchDateFilter(val label: String) {
 }
 
 private fun openEmailUrl(context: Context, emailUrl: String) {
-    val uri = runCatching { Uri.parse(emailUrl) }.getOrNull() ?: return
-    if (uri.scheme !in setOf("http", "https")) return
+    val uri = emailLinkCandidates(emailUrl).firstOrNull() ?: return
+    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+        addCategory(Intent.CATEGORY_BROWSABLE)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
     try {
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, uri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-        )
-    } catch (_: Exception) {}
+        context.startActivity(Intent.createChooser(intent, "Open original email").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    } catch (_: Exception) {
+        Toast.makeText(context, "Could not open the original email.", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun emailLinkCandidates(emailUrl: String): List<Uri> {
+    val uri = runCatching { Uri.parse(emailUrl.trim()) }.getOrNull() ?: return emptyList()
+    if (uri.scheme !in setOf("http", "https")) return emptyList()
+    val host = uri.host.orEmpty().lowercase(Locale.US)
+    val allowedHost = listOf(
+        "mail.google.com",
+        "outlook.live.com",
+        "outlook.office.com",
+        "outlook.office365.com",
+        "mail.yahoo.com"
+    ).any { host == it || host.endsWith(".$it") }
+    if (!allowedHost) return emptyList()
+    return listOf(uri)
 }
 
 private fun createCameraUri(context: Context): Uri {
@@ -3804,6 +3846,65 @@ private fun normalizeCurrencyCode(value: String?): String? {
     return runCatching { Currency.getInstance(normalized).currencyCode }.getOrNull()
 }
 
+private val StandardReceiptCategories = listOf(
+    "Groceries",
+    "Electronics",
+    "Home",
+    "Business",
+    "Shopping",
+    "Food",
+    "Travel",
+    "Health",
+    "Auto",
+    "Other",
+    "Uncategorized"
+)
+
+private fun normalizeReceiptCategory(value: String?): String {
+    val normalized = value.orEmpty()
+        .lowercase(Locale.US)
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+    return when {
+        normalized.isBlank() -> "Uncategorized"
+        normalized in setOf("grocery", "groceries", "supermarket", "market") -> "Groceries"
+        normalized in setOf("electronic", "electronics", "tech", "computer", "phone") -> "Electronics"
+        normalized in setOf("home", "house", "household", "utilities", "utility") -> "Home"
+        normalized in setOf("business", "office", "work", "professional") -> "Business"
+        normalized in setOf("shopping", "retail", "store", "purchase") -> "Shopping"
+        normalized in setOf("food", "restaurant", "restaurants", "dining", "coffee", "cafe") -> "Food"
+        normalized in setOf("travel", "trip", "hotel", "flight", "airline", "rideshare") -> "Travel"
+        normalized in setOf("health", "healthcare", "medical", "pharmacy", "doctor", "clinic") -> "Health"
+        normalized in setOf("auto", "car", "vehicle", "gas", "fuel", "automotive") -> "Auto"
+        normalized == "other" -> "Other"
+        normalized == "uncategorized" -> "Uncategorized"
+        else -> StandardReceiptCategories.firstOrNull { it.normalizeSearchText() == normalized } ?: "Other"
+    }
+}
+
+private fun receiptMetadataPattern(receipt: Receipt): String {
+    val purchasedMonth = receipt.purchasedIso.take(7)
+    val returnValue = receipt.returnByIso ?: "not-set"
+    val warrantyValue = receipt.warrantyUntilIso ?: "not-set"
+    return listOf(
+        "purchased:${receipt.purchasedIso}",
+        "purchase:${receipt.purchasedIso}",
+        "date:${receipt.purchasedIso}",
+        "month:$purchasedMonth",
+        "category:${receipt.normalizedCategory.toPatternToken()}",
+        "return:${if (receipt.returnByIso == null) "not-set" else "set"}",
+        "return:$returnValue",
+        "warranty:${if (receipt.warrantyUntilIso == null) "not-set" else "set"}",
+        "warranty:$warrantyValue"
+    ).joinToString(" ")
+}
+
+private fun String.toPatternToken(): String =
+    lowercase(Locale.US)
+        .replace(Regex("""[^a-z0-9]+"""), "-")
+        .trim('-')
+        .ifBlank { "uncategorized" }
+
 private fun String.toLocalDateOrNull(): LocalDate? {
     return runCatching { LocalDate.parse(trim()) }.getOrNull()
 }
@@ -3826,11 +3927,11 @@ private fun List<Receipt>.searchReceipts(query: String): List<Receipt> {
         .replace("category:", " ")
         .split(Regex("""\s+"""))
         .filter { it.isNotBlank() && it !in SearchStopWords }
-    val knownCategories = map { it.category.normalizeSearchText() }.toSet()
+    val knownCategories = map { it.normalizedCategory.normalizeSearchText() }.toSet()
     val categoryTerm = explicitCategory ?: terms.firstOrNull { it in knownCategories }
 
     if (categoryTerm != null) {
-        return filter { it.category.normalizeSearchText() == categoryTerm }
+        return filter { it.normalizedCategory.normalizeSearchText() == categoryTerm }
     }
 
     return filter { receipt ->
@@ -3873,19 +3974,28 @@ private val SearchStopWords = setOf("category", "categories", "receipt", "receip
 private fun Receipt.matchesSearchTerm(term: String): Boolean {
     if (term == "warranty") return warrantyUntilMillis != null
     if (term == "return") return returnByMillis != null
+    if (term == "purchased" || term == "purchase" || term == "date") return true
     return listOf(
         merchant,
-        category,
+        normalizedCategory,
         location,
         notes,
         purchaseDateLabel,
+        purchasedIso,
+        returnByLabel,
+        returnByIso.orEmpty(),
+        warrantyLabel,
+        warrantyUntilIso.orEmpty(),
+        metadataPattern,
+        formatCurrency(amountCents, currencyCode),
+        "%.2f".format(Locale.US, amountCents / 100.0),
         rawText
     ).any { field -> field.normalizeSearchText().containsWholeSearchTerm(term) }
 }
 
 private fun String.normalizeSearchText(): String {
     return lowercase(Locale.getDefault())
-        .replace(Regex("""[^a-z0-9:]+"""), " ")
+        .replace(Regex("""[^a-z0-9:-]+"""), " ")
         .trim()
 }
 

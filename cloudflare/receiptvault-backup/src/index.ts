@@ -104,6 +104,7 @@ type ProviderMessageCandidate = {
   snippet?: string;
   hasAttachments?: boolean;
   webUrl?: string;
+  rfc822MessageId?: string;
 };
 
 type ConnectorSyncReport = {
@@ -1018,10 +1019,11 @@ async function syncProviderForUser(
       const amountCents = (typeof ai?.total === "number" && ai.total > 0)
         ? Math.round(ai.total * 100)
         : extractAmountCents(`${candidate.subject || ""} ${bodyText}`);
-      const category = typeof ai?.category === "string" && ai.category !== "Uncategorized"
+      const category = normalizeReceiptCategory(typeof ai?.category === "string" && ai.category !== "Uncategorized"
         ? ai.category
-        : "Uncategorized";
+        : "Uncategorized");
       const aiConfidence = typeof ai?.confidence === "number" ? ai.confidence : 0;
+      const purchasedAtMillis = Number.isNaN(purchasedAtMs) ? Date.now() : purchasedAtMs;
 
       // Use bodyText only in memory for extraction — do NOT persist raw email content
       const receipt: Record<string, unknown> = {
@@ -1029,11 +1031,12 @@ async function syncProviderForUser(
         emailMessageId: receiptId,
         merchant,
         amountCents,
-        purchasedAtMillis: Number.isNaN(purchasedAtMs) ? Date.now() : purchasedAtMs,
+        purchasedAtMillis,
         category,
         location: "Location not detected",
         returnByMillis: null,
         warrantyUntilMillis: null,
+        metadataPattern: receiptMetadataPattern(purchasedAtMillis, category, null, null),
         notes: aiConfidence > 0.6
           ? `Gemini categorized ${Math.round(aiConfidence * 100)}% — ${candidate.from || "email"} · ${candidate.subject || "no subject"}`
           : `Imported from ${candidate.from || "email"} — ${candidate.subject || "no subject"}`,
@@ -1178,16 +1181,15 @@ async function fetchGmailCandidates(
       detailUrl.searchParams.append("metadataHeaders", "Subject");
       detailUrl.searchParams.append("metadataHeaders", "From");
       detailUrl.searchParams.append("metadataHeaders", "Date");
+      detailUrl.searchParams.append("metadataHeaders", "Message-ID");
 
       const detailResponse = await fetch(detailUrl, { headers: { authorization: `Bearer ${accessToken}` } });
       if (!detailResponse.ok) continue;
       const detail: Record<string, unknown> = await detailResponse.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
       const headers = gmailHeaders(detail);
       const threadId = typeof detail.threadId === "string" ? detail.threadId : id;
-      const encodedThreadId = encodeURIComponent(threadId);
-      const webUrl = accountEmail
-        ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(accountEmail)}#all/${encodedThreadId}`
-        : `https://mail.google.com/mail/u/0/#all/${encodedThreadId}`;
+      const rfc822MessageId = typeof headers["Message-ID"] === "string" ? headers["Message-ID"] : "";
+      const webUrl = gmailWebUrl(accountEmail, threadId, rfc822MessageId);
       candidates.push({
         id,
         subject: headers.Subject,
@@ -1195,7 +1197,8 @@ async function fetchGmailCandidates(
         date: headers.Date,
         snippet: typeof detail.snippet === "string" ? detail.snippet : "",
         hasAttachments: false,
-        webUrl
+        webUrl,
+        rfc822MessageId
       });
     }
 
@@ -1204,6 +1207,17 @@ async function fetchGmailCandidates(
   } while (pageToken);
 
   return candidates;
+}
+
+function gmailWebUrl(accountEmail: string | undefined, threadId: string, rfc822MessageId?: string): string {
+  const base = accountEmail
+    ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(accountEmail)}`
+    : "https://mail.google.com/mail/u/0/";
+  const cleanMessageId = (rfc822MessageId || "").trim().replace(/^<|>$/g, "");
+  if (cleanMessageId) {
+    return `${base}#search/rfc822msgid%3A${encodeURIComponent(cleanMessageId)}`;
+  }
+  return `${base}#all/${encodeURIComponent(threadId)}`;
 }
 
 async function fetchGmailMessageFullText(accessToken: string, messageId: string): Promise<string> {
@@ -1274,6 +1288,54 @@ function extractAmountCents(text: string): number {
   // Prefer largest amount ≤ $10,000 (likely the order total, not a line item)
   const valid = amounts.filter((a) => a <= 1000000);
   return valid.length > 0 ? Math.max(...valid) : 0;
+}
+
+function normalizeReceiptCategory(value: string | undefined): string {
+  const normalized = (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  if (!normalized) return "Uncategorized";
+  if (["grocery", "groceries", "supermarket", "market"].includes(normalized)) return "Groceries";
+  if (["electronic", "electronics", "tech", "computer", "phone"].includes(normalized)) return "Electronics";
+  if (["home", "house", "household", "utilities", "utility"].includes(normalized)) return "Home";
+  if (["business", "office", "work", "professional"].includes(normalized)) return "Business";
+  if (["shopping", "retail", "store", "purchase"].includes(normalized)) return "Shopping";
+  if (["food", "restaurant", "restaurants", "dining", "coffee", "cafe"].includes(normalized)) return "Food";
+  if (["travel", "trip", "hotel", "flight", "airline", "rideshare"].includes(normalized)) return "Travel";
+  if (["health", "healthcare", "medical", "pharmacy", "doctor", "clinic"].includes(normalized)) return "Health";
+  if (["auto", "car", "vehicle", "gas", "fuel", "automotive"].includes(normalized)) return "Auto";
+  if (normalized === "other") return "Other";
+  if (normalized === "uncategorized") return "Uncategorized";
+  const categories = ["Groceries", "Electronics", "Home", "Business", "Shopping", "Food", "Travel", "Health", "Auto", "Other", "Uncategorized"];
+  return categories.find((category) => toPatternToken(category) === toPatternToken(normalized)) || "Other";
+}
+
+function receiptMetadataPattern(
+  purchasedAtMillis: number,
+  category: string,
+  returnByMillis: number | null,
+  warrantyUntilMillis: number | null
+): string {
+  const purchased = new Date(purchasedAtMillis).toISOString().slice(0, 10);
+  const month = purchased.slice(0, 7);
+  const returnValue = returnByMillis ? new Date(returnByMillis).toISOString().slice(0, 10) : "not-set";
+  const warrantyValue = warrantyUntilMillis ? new Date(warrantyUntilMillis).toISOString().slice(0, 10) : "not-set";
+  return [
+    `purchased:${purchased}`,
+    `purchase:${purchased}`,
+    `date:${purchased}`,
+    `month:${month}`,
+    `category:${toPatternToken(category)}`,
+    `return:${returnByMillis ? "set" : "not-set"}`,
+    `return:${returnValue}`,
+    `warranty:${warrantyUntilMillis ? "set" : "not-set"}`,
+    `warranty:${warrantyValue}`
+  ].join(" ");
+}
+
+function toPatternToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "uncategorized";
 }
 
 function gmailHeaders(detail: Record<string, unknown>): Record<string, string> {
