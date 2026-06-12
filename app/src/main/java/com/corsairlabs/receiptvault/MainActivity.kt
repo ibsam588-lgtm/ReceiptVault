@@ -466,7 +466,13 @@ private fun ReceiptVaultApp(
                     onDeleteMultiple = { ids -> viewModel.deleteReceipts(ids) {} }
                 )
 
-                AppScreen.Warranties -> WarrantyScreen(receipts)
+                AppScreen.Warranties -> WarrantyScreen(
+                    receipts = receipts,
+                    onSelect = {
+                        viewModel.selectReceipt(it.id)
+                        onScreenChange(AppScreen.Detail)
+                    }
+                )
                 AppScreen.Analytics -> AnalyticsScreen(receipts = receipts, activePlan = activePlan)
                 AppScreen.Email -> EmailConnectorsScreen(
                     accounts = emailAccounts,
@@ -735,7 +741,7 @@ private fun HomeScreen(
             SectionHeader("Protected purchases", "View", onWarranties)
         }
         items(receipts.filter { it.warrantyUntilMillis != null }.take(3), key = { "warranty-${it.id}" }) { receipt ->
-            WarrantyMiniRow(receipt)
+            WarrantyMiniRow(receipt, onClick = { onSelect(receipt) })
         }
     }
 }
@@ -900,7 +906,9 @@ private fun SearchScreen(
                             onLongClick = { selectedIds = selectedIds + receipt.id }
                         )
                     ) {
-                        ReceiptRow(receipt, onClick = {})
+                        // No inner onClick: the wrapping Box's combinedClickable handles
+                        // tap and long-press; an inner clickable would swallow both.
+                        ReceiptRow(receipt)
                         if (inSelectMode) {
                             Checkbox(
                                 checked = receipt.id in selectedIds,
@@ -954,7 +962,7 @@ private fun SearchScreen(
 }
 
 @Composable
-private fun WarrantyScreen(receipts: List<Receipt>) {
+private fun WarrantyScreen(receipts: List<Receipt>, onSelect: (Receipt) -> Unit) {
     val warranties = receipts.filter { it.warrantyUntilMillis != null || it.returnByMillis != null }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -998,7 +1006,7 @@ private fun WarrantyScreen(receipts: List<Receipt>) {
             }
         } else {
             items(warranties, key = { it.id }) { receipt ->
-                WarrantyRow(receipt)
+                WarrantyRow(receipt, onClick = { onSelect(receipt) })
             }
         }
     }
@@ -1917,11 +1925,11 @@ private fun SectionHeader(title: String, action: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ReceiptRow(receipt: Receipt, onClick: () -> Unit) {
+private fun ReceiptRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
@@ -1941,8 +1949,14 @@ private fun ReceiptRow(receipt: Receipt, onClick: () -> Unit) {
 }
 
 @Composable
-private fun WarrantyMiniRow(receipt: Receipt) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+private fun WarrantyMiniRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(Color.White)
+    ) {
         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Shield, contentDescription = null, tint = TealDark)
             Spacer(Modifier.width(12.dp))
@@ -1956,8 +1970,14 @@ private fun WarrantyMiniRow(receipt: Receipt) {
 }
 
 @Composable
-private fun WarrantyRow(receipt: Receipt) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+private fun WarrantyRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(Color.White)
+    ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             MerchantMark(receipt.merchant)
             Spacer(Modifier.width(12.dp))
