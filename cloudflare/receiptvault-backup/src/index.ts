@@ -1644,6 +1644,7 @@ function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): st
     '  "isReceipt": boolean,',
     '  "merchant": string,',
     '  "total": number | null,',
+    '  "currencyCode": "USD" | "CAD" | "AUD" | "EUR" | "GBP" | "INR" | "PKR" | "AED" | "SAR" | "JPY" | "CNY" | "KRW" | "TRY" | "BRL" | "MXN" | null,',
     '  "purchaseDate": "YYYY-MM-DD" | null,',
     '  "category": "Groceries" | "Electronics" | "Home" | "Business" | "Shopping" | "Food" | "Travel" | "Health" | "Auto" | "Other" | "Uncategorized",',
     '  "warrantyCandidate": boolean,',

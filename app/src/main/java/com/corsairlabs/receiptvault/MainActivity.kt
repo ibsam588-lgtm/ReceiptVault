@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
@@ -140,6 +141,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.util.Currency
 import java.util.Locale
 import java.util.UUID
 import kotlin.coroutines.resume
@@ -165,26 +167,26 @@ private val Coral = Color(0xFFEF6959)
 private val VaultBlue = Color(0xFF4367DC)
 
 class MainActivity : ComponentActivity() {
-    private var sharedUris by mutableStateOf<List<Uri>>(emptyList())
+    private var sharedImports by mutableStateOf<List<SharedReceiptImport>>(emptyList())
     private var oauthCallbackPending by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        sharedUris = extractSharedImageUris(intent)
+        sharedImports = extractSharedReceiptImports(intent)
         if (isOAuthCallback(intent)) oauthCallbackPending = true
         setContent {
             ReceiptVaultRoot(
-                sharedUris = sharedUris,
+                sharedImports = sharedImports,
                 oauthCallbackPending = oauthCallbackPending,
                 onOAuthCallbackConsumed = { oauthCallbackPending = false },
-                onSharedUrisConsumed = { sharedUris = emptyList() }
+                onSharedImportsConsumed = { sharedImports = emptyList() }
             )
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        sharedUris = extractSharedImageUris(intent)
+        sharedImports = extractSharedReceiptImports(intent)
         if (isOAuthCallback(intent)) oauthCallbackPending = true
     }
 
@@ -196,10 +198,10 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun ReceiptVaultRoot(
-    sharedUris: List<Uri>,
+    sharedImports: List<SharedReceiptImport>,
     oauthCallbackPending: Boolean = false,
     onOAuthCallbackConsumed: () -> Unit = {},
-    onSharedUrisConsumed: () -> Unit
+    onSharedImportsConsumed: () -> Unit
 ) {
     val context = LocalContext.current
     val viewModel: ReceiptVaultViewModel = viewModel(
@@ -219,11 +221,12 @@ private fun ReceiptVaultRoot(
     val authMessage by viewModel.authMessage.collectAsState()
     var screen by rememberSaveable { mutableStateOf(AppScreen.Home) }
     var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
-    val googleSignInClient = remember(context) {
+    val googleWebClientId = remember(context) { resolveGoogleSignInWebClientId(context) }
+    val googleSignInClient = remember(context, googleWebClientId) {
         val builder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
-        if (BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID.isNotBlank()) {
-            builder.requestIdToken(BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID)
+        if (googleWebClientId.isNotBlank()) {
+            builder.requestIdToken(googleWebClientId)
         }
         GoogleSignIn.getClient(context, builder.build())
     }
@@ -260,11 +263,11 @@ private fun ReceiptVaultRoot(
     }
 
     // B1: launchSharedImport deduplicates URIs in the ViewModel so rotation doesn't re-import
-    LaunchedEffect(sharedUris, authUser) {
-        if (sharedUris.isNotEmpty() && authUser != null) {
-            viewModel.launchSharedImport(sharedUris) {
+    LaunchedEffect(sharedImports, authUser) {
+        if (sharedImports.isNotEmpty() && authUser != null) {
+            viewModel.launchSharedImport(sharedImports) {
                 screen = AppScreen.Detail
-                onSharedUrisConsumed()
+                onSharedImportsConsumed()
             }
         }
     }
@@ -312,12 +315,12 @@ private fun ReceiptVaultRoot(
             AuthScreen(
                 isBusy = authBusy,
                 message = authMessage,
-                googleSsoAvailable = BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID.isNotBlank(),
+                googleSsoAvailable = googleWebClientId.isNotBlank(),
                 onSignIn = viewModel::signInWithEmail,
                 onSignUp = viewModel::signUpWithEmail,
                 onGoogle = {
-                    if (BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID.isBlank()) {
-                        viewModel.showAuthMessage("Google SSO needs a web client ID in the release build.")
+                    if (googleWebClientId.isBlank()) {
+                        viewModel.showAuthMessage("Google SSO needs the Firebase web client ID in this build.")
                     } else {
                         googleSignInLauncher.launch(googleSignInClient.signInIntent)
                     }
@@ -505,7 +508,8 @@ private fun ReceiptVaultApp(
                         (viewModel.selectedReceipt?.id ?: receipts.firstOrNull()?.id)?.let { id ->
                             viewModel.updateReceiptText(id, text)
                         }
-                    }
+                    },
+                    onSave = viewModel::updateReceipt
                 )
             }
 
@@ -668,22 +672,23 @@ private fun HomeScreen(
     onEmail: () -> Unit,
     onWarranties: () -> Unit
 ) {
-    val total = receipts.sumOf { it.amountCents }
+    val totalLabel = formatReceiptTotal(receipts)
     // B16: filter to current calendar month so "This month" is accurate
-    val thisMonthTotal = run {
+    val thisMonthReceipts = run {
         val now = LocalDate.now()
         receipts.filter {
             val d = Instant.ofEpochMilli(it.purchasedAtMillis).atZone(ZoneId.systemDefault()).toLocalDate()
             d.year == now.year && d.monthValue == now.monthValue
-        }.sumOf { it.amountCents }
+        }
     }
+    val thisMonthLabel = formatReceiptTotal(thisMonthReceipts)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            VaultHero(total, receipts.size, onScan)
+            VaultHero(totalLabel, receipts.size, onScan)
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -722,7 +727,7 @@ private fun HomeScreen(
                 StatCard(
                     modifier = Modifier.weight(1f),
                     label = "This month",
-                    value = formatCurrency(thisMonthTotal),
+                    value = thisMonthLabel,
                     accent = Coral
                 )
             }
@@ -749,7 +754,7 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun VaultHero(total: Long, count: Int, onScan: () -> Unit) {
+private fun VaultHero(totalLabel: String, count: Int, onScan: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF173943)),
         shape = RoundedCornerShape(8.dp)
@@ -764,7 +769,7 @@ private fun VaultHero(total: Long, count: Int, onScan: () -> Unit) {
             Column {
                 Text("Total tracked", color = Color.White.copy(alpha = 0.72f))
                 Text(
-                    formatCurrency(total),
+                    totalLabel,
                     color = Color.White,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.ExtraBold
@@ -838,18 +843,13 @@ private fun SearchScreen(
     var selectedIds by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     val inSelectMode = selectedIds.isNotEmpty()
     val filtered = remember(query, receipts) {
-        receipts.filter { receipt ->
-            val haystack = listOf(
-                receipt.merchant,
-                receipt.category,
-                receipt.location,
-                receipt.notes,
-                receipt.rawText,
-                formatCurrency(receipt.amountCents),
-                receipt.purchaseDateLabel
-            ).joinToString(" ").lowercase(Locale.US)
-            haystack.contains(query.lowercase(Locale.US))
-        }
+        receipts.searchReceipts(query)
+    }
+    val categories = remember(receipts) {
+        receipts.map { it.category }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase(Locale.US) }
+            .sorted()
     }
 
     // Drop any selected ids that no longer exist (e.g. after a bulk delete).
@@ -885,7 +885,9 @@ private fun SearchScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     AssistChip(onClick = { query = "" }, label = { Text("All") })
                     AssistChip(onClick = { query = "warranty" }, label = { Text("Warranty") })
-                    AssistChip(onClick = { query = "business" }, label = { Text("Business") })
+                    categories.take(4).forEach { category ->
+                        AssistChip(onClick = { query = "category:$category" }, label = { Text(category) })
+                    }
                 }
             }
             if (filtered.isEmpty()) {
@@ -989,7 +991,7 @@ private fun WarrantyScreen(receipts: List<Receipt>, onSelect: (Receipt) -> Unit)
                     Column {
                         Text("Coverage value", color = Color.White.copy(alpha = 0.72f))
                         Text(
-                            formatCurrency(warranties.sumOf { it.amountCents }),
+                            formatReceiptTotal(warranties),
                             color = Color.White,
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.ExtraBold
@@ -1003,7 +1005,7 @@ private fun WarrantyScreen(receipts: List<Receipt>, onSelect: (Receipt) -> Unit)
             item {
                 Card(shape = RoundedCornerShape(8.dp)) {
                     Text(
-                        "Warranties and return dates will appear here after you scan important purchases.",
+                        "Warranties will appear here after you set a warranty date on an important purchase.",
                         modifier = Modifier.padding(18.dp),
                         color = Muted
                     )
@@ -1467,7 +1469,8 @@ private fun ReceiptDetailScreen(
     receipt: Receipt?,
     onBack: () -> Unit,
     onDelete: () -> Unit,
-    onUpdateText: (String) -> Unit = {}
+    onUpdateText: (String) -> Unit = {},
+    onSave: (Receipt) -> Unit = {}
 ) {
     if (receipt == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1480,6 +1483,9 @@ private fun ReceiptDetailScreen(
     }
 
     val context = LocalContext.current
+    var editingDetails by remember(receipt.id) { mutableStateOf(false) }
+    var editState by remember(receipt.id) { mutableStateOf(ReceiptEditState.from(receipt)) }
+    var editError by remember(receipt.id) { mutableStateOf("") }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1492,7 +1498,7 @@ private fun ReceiptDetailScreen(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(receipt.merchant, color = Muted, fontWeight = FontWeight.Bold)
-                    Text(formatCurrency(receipt.amountCents), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                    Text(formatCurrency(receipt.amountCents, receipt.currencyCode), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
                 }
                 AssistChip(
                     onClick = {
@@ -1504,9 +1510,45 @@ private fun ReceiptDetailScreen(
                     label = { Text(receipt.source.label) }
                 )
                 Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = {
+                        editState = ReceiptEditState.from(receipt)
+                        editError = ""
+                        editingDetails = !editingDetails
+                    }
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit receipt details", tint = TealDark)
+                }
                 IconButton(onClick = onDelete) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete receipt", tint = Coral)
                 }
+            }
+        }
+        if (editingDetails) {
+            item {
+                ReceiptEditCard(
+                    state = editState,
+                    error = editError,
+                    onStateChange = {
+                        editState = it
+                        editError = ""
+                    },
+                    onCancel = {
+                        editState = ReceiptEditState.from(receipt)
+                        editError = ""
+                        editingDetails = false
+                    },
+                    onSave = {
+                        val updated = editState.toReceipt(receipt)
+                        if (updated == null) {
+                            editError = "Use YYYY-MM-DD for dates, a valid amount, and a valid 3-letter currency."
+                        } else {
+                            onSave(updated)
+                            editError = ""
+                            editingDetails = false
+                        }
+                    }
+                )
             }
         }
         item {
@@ -1599,6 +1641,91 @@ private fun ReceiptDetailScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReceiptEditCard(
+    state: ReceiptEditState,
+    error: String,
+    onStateChange: (ReceiptEditState) -> Unit,
+    onCancel: () -> Unit,
+    onSave: () -> Unit
+) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Edit receipt details", fontWeight = FontWeight.ExtraBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = state.amount,
+                    onValueChange = { onStateChange(state.copy(amount = it)) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Amount") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = state.currencyCode,
+                    onValueChange = { onStateChange(state.copy(currencyCode = it.uppercase(Locale.US).take(3))) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Currency") },
+                    singleLine = true
+                )
+            }
+            OutlinedTextField(
+                value = state.purchaseDate,
+                onValueChange = { onStateChange(state.copy(purchaseDate = it)) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Purchase date") },
+                placeholder = { Text("YYYY-MM-DD") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = state.category,
+                onValueChange = { onStateChange(state.copy(category = it)) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Category") },
+                singleLine = true
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = state.returnByDate,
+                    onValueChange = { onStateChange(state.copy(returnByDate = it)) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Return by") },
+                    placeholder = { Text("Blank for none") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = state.warrantyUntilDate,
+                    onValueChange = { onStateChange(state.copy(warrantyUntilDate = it)) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Warranty") },
+                    placeholder = { Text("Blank for none") },
+                    singleLine = true
+                )
+            }
+            if (error.isNotBlank()) {
+                Text(error, color = Coral, style = MaterialTheme.typography.bodySmall)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Cancel")
+                }
+                Button(
+                    onClick = onSave,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal)
+                ) {
+                    Text("Save")
                 }
             }
         }
@@ -1699,16 +1826,23 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
     }
 
     // Category totals
-    val categoryTotals: List<Pair<String, Long>> = receipts
+    val categoryTotals: List<Pair<String, List<Receipt>>> = receipts
         .groupBy { it.category }
-        .map { (cat, items) -> cat to items.sumOf { it.amountCents } }
-        .sortedByDescending { it.second }
+        .map { (cat, items) -> cat to items }
+        .sortedByDescending { (_, items) -> items.sumOf { it.amountCents } }
         .take(5)
 
     val categoryColors = listOf(Teal, Coral, Amber, VaultBlue, Color(0xFF7C4DFF))
     val maxMonthly = monthlyData.maxOfOrNull { it.second }?.takeIf { it > 0 } ?: 1L
     val totalSpent = receipts.sumOf { it.amountCents }
-    val avgAmount = if (receipts.isNotEmpty()) totalSpent / receipts.size else 0L
+    val oneCurrency = receipts.map { normalizeCurrencyCode(it.currencyCode) ?: defaultCurrencyCode() }.distinct().singleOrNull()
+    val avgAmountLabel = if (receipts.isNotEmpty() && oneCurrency != null) {
+        formatCurrency(totalSpent / receipts.size, oneCurrency)
+    } else if (receipts.isEmpty()) {
+        formatCurrency(0, defaultCurrencyCode())
+    } else {
+        "Mixed"
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1718,8 +1852,8 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
         item {
             // Stats row
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatCard(Modifier.weight(1f), "Total spent", formatCurrency(totalSpent), Teal)
-                StatCard(Modifier.weight(1f), "Avg receipt", formatCurrency(avgAmount), Coral)
+                StatCard(Modifier.weight(1f), "Total spent", formatReceiptTotal(receipts), Teal)
+                StatCard(Modifier.weight(1f), "Avg receipt", avgAmountLabel, Coral)
                 StatCard(Modifier.weight(1f), "Receipts", receipts.size.toString(), Amber)
             }
         }
@@ -1777,13 +1911,14 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             // Donut
-                            val catTotal = categoryTotals.sumOf { it.second }.takeIf { it > 0 } ?: 1L
+                            val catTotal = categoryTotals.sumOf { (_, items) -> items.sumOf { it.amountCents } }.takeIf { it > 0 } ?: 1L
                             Canvas(modifier = Modifier.size(120.dp)) {
                                 val strokeWidth = 28.dp.toPx()
                                 val radius = (size.minDimension - strokeWidth) / 2
                                 val center = androidx.compose.ui.geometry.Offset(size.width / 2, size.height / 2)
                                 var startAngle = -90f
-                                categoryTotals.forEachIndexed { i, (_, amount) ->
+                                categoryTotals.forEachIndexed { i, (_, items) ->
+                                    val amount = items.sumOf { it.amountCents }
                                     val sweep = (amount.toFloat() / catTotal.toFloat()) * 360f
                                     drawArc(
                                         color = categoryColors.getOrElse(i) { Muted },
@@ -1799,11 +1934,11 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
                             }
                             // Legend
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
-                                categoryTotals.forEachIndexed { i, (cat, amount) ->
+                                categoryTotals.forEachIndexed { i, (cat, items) ->
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(categoryColors.getOrElse(i) { Muted }))
                                         Text(cat, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(formatCurrency(amount), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        Text(formatReceiptTotal(items), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -1817,19 +1952,19 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
             if (receipts.isNotEmpty()) {
                 val topMerchants = receipts
                     .groupBy { it.merchant }
-                    .map { (merchant, items) -> merchant to items.sumOf { it.amountCents } }
-                    .sortedByDescending { it.second }
+                    .map { (merchant, items) -> merchant to items }
+                    .sortedByDescending { (_, items) -> items.sumOf { it.amountCents } }
                     .take(5)
                 Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("Top merchants", fontWeight = FontWeight.ExtraBold)
-                        topMerchants.forEach { (merchant, amount) ->
+                        topMerchants.forEach { (merchant, items) ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
                                     MerchantMark(merchant)
                                     Text(merchant, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                                Text(formatCurrency(amount), fontWeight = FontWeight.ExtraBold)
+                                Text(formatReceiptTotal(items), fontWeight = FontWeight.ExtraBold)
                             }
                         }
                     }
@@ -1878,12 +2013,12 @@ private fun TaxExportCard(receipts: List<Receipt>) {
 
 private fun buildTaxCsv(receipts: List<Receipt>): String {
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val header = "Date,Merchant,Category,Amount,Tax Amount,Notes"
+    val header = "Date,Merchant,Category,Amount,Currency,Tax Amount,Notes"
     val rows = receipts.sortedByDescending { it.purchasedAtMillis }.map { r ->
         val date = Instant.ofEpochMilli(r.purchasedAtMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(fmt)
         val amount = "%.2f".format(r.amountCents / 100.0)
         fun csvField(s: String) = "\"${s.replace("\"", "\"\"")}\""
-        listOf(date, csvField(r.merchant), csvField(r.category), amount, "", csvField(r.notes)).joinToString(",")
+        listOf(date, csvField(r.merchant), csvField(r.category), amount, r.currencyCode, "", csvField(r.notes)).joinToString(",")
     }
     return (listOf(header) + rows).joinToString("\n")
 }
@@ -1948,7 +2083,7 @@ private fun ReceiptRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
                 Text(receipt.merchant, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${receipt.category} - ${receipt.purchaseDateLabel}", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            Text(formatCurrency(receipt.amountCents), fontWeight = FontWeight.ExtraBold)
+            Text(formatCurrency(receipt.amountCents, receipt.currencyCode), fontWeight = FontWeight.ExtraBold)
         }
     }
 }
@@ -1969,7 +2104,7 @@ private fun WarrantyMiniRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
                 Text(receipt.merchant, fontWeight = FontWeight.ExtraBold)
                 Text(receipt.warrantyLabel, color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            Text(formatCurrency(receipt.amountCents), fontWeight = FontWeight.Bold)
+            Text(formatCurrency(receipt.amountCents, receipt.currencyCode), fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1991,7 +2126,7 @@ private fun WarrantyRow(receipt: Receipt, onClick: (() -> Unit)? = null) {
                 Text("Return: ${receipt.returnByLabel}", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Text("Warranty: ${receipt.warrantyLabel}", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            Text(formatCurrency(receipt.amountCents), fontWeight = FontWeight.ExtraBold)
+            Text(formatCurrency(receipt.amountCents, receipt.currencyCode), fontWeight = FontWeight.ExtraBold)
         }
     }
 }
@@ -2399,7 +2534,11 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         return true
     }
 
-    suspend fun importReceipt(uri: Uri, source: ImportSource): Receipt? {
+    suspend fun importReceipt(
+        uri: Uri,
+        source: ImportSource,
+        emailUrl: String? = null
+    ): Receipt? {
         _isBusy.value = true
         return try {
             val id = UUID.randomUUID().toString()
@@ -2443,6 +2582,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 id = id,
                 merchant = draft.merchant,
                 amountCents = draft.amountCents,
+                currencyCode = draft.currencyCode,
                 purchasedAtMillis = draft.purchasedAtMillis,
                 category = draft.category,
                 location = draft.location,
@@ -2451,7 +2591,8 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 notes = draft.notes,
                 rawText = rawText,
                 imagePath = imagePath,
-                source = source
+                source = source,
+                emailUrl = emailUrl
             )
             val updated = store.upsert(receipt)
             _receipts.value = updated
@@ -2480,11 +2621,17 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     // B1: track which shared URIs were already imported so rotation doesn't re-import them
     private val consumedSharedUris = mutableSetOf<String>()
 
-    fun launchSharedImport(uris: List<Uri>, onComplete: () -> Unit) {
+    fun launchSharedImport(imports: List<SharedReceiptImport>, onComplete: () -> Unit) {
         viewModelScope.launch {
-            val newUris = uris.filter { consumedSharedUris.add(it.toString()) }
-            if (newUris.isNotEmpty()) {
-                newUris.forEach { importReceipt(it, ImportSource.EmailShare) }
+            val newImports = imports.filter { consumedSharedUris.add("${it.uri}|${it.emailUrl.orEmpty()}") }
+            if (newImports.isNotEmpty()) {
+                newImports.forEach { sharedImport ->
+                    importReceipt(
+                        uri = sharedImport.uri,
+                        source = ImportSource.EmailShare,
+                        emailUrl = sharedImport.emailUrl
+                    )
+                }
                 onComplete()
             }
         }
@@ -2546,6 +2693,13 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         _receipts.value = updated
         store.saveAll(updated)
         _message.value = "Text updated."
+    }
+
+    fun updateReceipt(receipt: Receipt) {
+        val updated = store.upsert(receipt)
+        _receipts.value = updated
+        selectedReceiptId = receipt.id
+        _message.value = "Receipt updated."
     }
 
     fun connectEmailProvider(provider: EmailProvider) {
@@ -2738,6 +2892,18 @@ private fun FirebaseUser.toReceiptVaultAuthUser(): ReceiptVaultAuthUser =
         email = email ?: displayName ?: "Signed in",
         displayName = displayName ?: email ?: "ReceiptVault user"
     )
+
+private fun resolveGoogleSignInWebClientId(context: Context): String {
+    val fromBuild = BuildConfig.GOOGLE_SIGN_IN_WEB_CLIENT_ID.trim()
+    if (fromBuild.isNotBlank()) return fromBuild
+
+    val resourceId = context.resources.getIdentifier(
+        "default_web_client_id",
+        "string",
+        context.packageName
+    )
+    return if (resourceId == 0) "" else context.getString(resourceId).trim()
+}
 
 private fun authErrorMessage(error: Exception): String {
     if (error is ApiException) {
@@ -3061,7 +3227,7 @@ private class ReceiptParser {
         "Groceries", "Electronics", "Home", "Business", "Shopping",
         "Food", "Travel", "Health", "Auto", "Other", "Uncategorized"
     )
-    private val moneyRegex = Regex("""\$?\s*([0-9]{1,4}(?:,[0-9]{3})*\.[0-9]{2})""")
+    private val moneyRegex = Regex("""(?i)(?:\b[A-Z]{3}\s*)?[$€£¥₹₨₺₩₽₫₪₱]?\s*([0-9]{1,6}(?:[,.][0-9]{3})*(?:[,.][0-9]{2}))""")
     private val datePatterns = listOf(
         DateTimeFormatter.ofPattern("M/d/yyyy", Locale.US),
         DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.US),
@@ -3085,6 +3251,7 @@ private class ReceiptParser {
         } ?: "Unknown store"
 
         val amount = parseAmount(lines)
+        val currencyCode = inferCurrencyCode(rawText)
         val purchasedAt = parseDate(lines) ?: LocalDate.now()
         val category = inferCategory(rawText, merchant)
         // Issue 3: do NOT auto-set returnByMillis — only set it via explicit user input or AI signal
@@ -3097,6 +3264,7 @@ private class ReceiptParser {
         return ReceiptDraft(
             merchant = merchant.take(42),
             amountCents = amount,
+            currencyCode = currencyCode,
             purchasedAtMillis = purchasedAt.toMillis(),
             category = category,
             location = inferLocation(lines),
@@ -3119,6 +3287,8 @@ private class ReceiptParser {
             ?.takeIf { it >= 0.0 }
             ?.let { (it * 100).roundToLong() }
             ?: local.amountCents
+
+        val currencyCode = normalizeCurrencyCode(ai.currencyCode) ?: local.currencyCode
 
         // Issue 3: only set returnBy when the AI explicitly signals a return window
         val returnBy = ai.returnWindowDays
@@ -3143,6 +3313,7 @@ private class ReceiptParser {
         return local.copy(
             merchant = merchant.take(42),
             amountCents = amountCents,
+            currencyCode = currencyCode,
             purchasedAtMillis = purchasedAt.toMillis(),
             category = category,
             returnByMillis = returnBy,
@@ -3206,6 +3377,32 @@ private class ReceiptParser {
         }
     }
 
+    private fun inferCurrencyCode(rawText: String): String {
+        val upper = rawText.uppercase(Locale.US)
+        listOf("USD", "CAD", "AUD", "EUR", "GBP", "INR", "PKR", "AED", "SAR", "JPY", "CNY", "KRW", "TRY", "BRL", "MXN")
+            .firstOrNull { Regex("""\b$it\b""").containsMatchIn(upper) }
+            ?.let { return it }
+
+        return when {
+            rawText.contains("€") -> "EUR"
+            rawText.contains("£") -> "GBP"
+            rawText.contains("₹") -> "INR"
+            rawText.contains("₨") -> "PKR"
+            rawText.contains("AED", ignoreCase = true) -> "AED"
+            rawText.contains("SAR", ignoreCase = true) -> "SAR"
+            rawText.contains("¥") -> "JPY"
+            rawText.contains("₩") -> "KRW"
+            rawText.contains("₺") -> "TRY"
+            rawText.contains("₽") -> "RUB"
+            rawText.contains("₫") -> "VND"
+            rawText.contains("₪") -> "ILS"
+            rawText.contains("₱") -> "PHP"
+            rawText.contains("R$") -> "BRL"
+            rawText.contains("$") -> defaultCurrencyCode()
+            else -> defaultCurrencyCode()
+        }
+    }
+
     private fun inferLocation(lines: List<String>): String {
         return lines.firstOrNull { line ->
             Regex("""\b[A-Z]{2}\s+[0-9]{5}\b""").containsMatchIn(line)
@@ -3213,9 +3410,47 @@ private class ReceiptParser {
     }
 }
 
+data class ReceiptEditState(
+    val amount: String,
+    val currencyCode: String,
+    val purchaseDate: String,
+    val category: String,
+    val returnByDate: String,
+    val warrantyUntilDate: String
+) {
+    fun toReceipt(receipt: Receipt): Receipt? {
+        val amountCents = amount.toCentsOrNull() ?: return null
+        val purchaseDateMillis = purchaseDate.toLocalDateOrNull()?.toMillis() ?: return null
+        val returnMillis = returnByDate.toBlankableDateMillis() ?: return null
+        val warrantyMillis = warrantyUntilDate.toBlankableDateMillis() ?: return null
+        val normalizedCurrency = normalizeCurrencyCode(currencyCode) ?: return null
+
+        return receipt.copy(
+            amountCents = amountCents,
+            currencyCode = normalizedCurrency,
+            purchasedAtMillis = purchaseDateMillis,
+            category = category.trim().ifBlank { "Uncategorized" },
+            returnByMillis = returnMillis.takeIf { it > 0L },
+            warrantyUntilMillis = warrantyMillis.takeIf { it > 0L }
+        )
+    }
+
+    companion object {
+        fun from(receipt: Receipt): ReceiptEditState = ReceiptEditState(
+            amount = "%.2f".format(Locale.US, receipt.amountCents / 100.0),
+            currencyCode = receipt.currencyCode,
+            purchaseDate = receipt.purchasedAtMillis.formatIsoDate(),
+            category = receipt.category,
+            returnByDate = receipt.returnByMillis?.formatIsoDate().orEmpty(),
+            warrantyUntilDate = receipt.warrantyUntilMillis?.formatIsoDate().orEmpty()
+        )
+    }
+}
+
 data class ReceiptDraft(
     val merchant: String,
     val amountCents: Long,
+    val currencyCode: String,
     val purchasedAtMillis: Long,
     val category: String,
     val location: String,
@@ -3228,6 +3463,7 @@ data class Receipt(
     val id: String,
     val merchant: String,
     val amountCents: Long,
+    val currencyCode: String = defaultCurrencyCode(),
     val purchasedAtMillis: Long,
     val category: String,
     val location: String,
@@ -3248,6 +3484,7 @@ data class Receipt(
         .put("id", id)
         .put("merchant", merchant)
         .put("amountCents", amountCents)
+        .put("currencyCode", currencyCode)
         .put("purchasedAtMillis", purchasedAtMillis)
         .put("category", category)
         .put("location", location)
@@ -3266,6 +3503,7 @@ data class Receipt(
             id = json.optString("id", "").ifBlank { UUID.randomUUID().toString() },
             merchant = json.optString("merchant", "Unknown store"),
             amountCents = json.optLong("amountCents", 0),
+            currencyCode = normalizeCurrencyCode(json.optString("currencyCode", "")) ?: defaultCurrencyCode(),
             purchasedAtMillis = json.optLong("purchasedAtMillis", todayMillis()),
             category = json.optString("category", "Uncategorized"),
             location = json.optString("location", "Location not detected"),
@@ -3286,6 +3524,11 @@ enum class ImportSource(val label: String) {
     Image("Image"),
     EmailShare("Email")
 }
+
+data class SharedReceiptImport(
+    val uri: Uri,
+    val emailUrl: String?
+)
 
 enum class AppScreen(val title: String, val navLabel: String) {
     Home("ReceiptVault", "Home"),
@@ -3319,16 +3562,8 @@ private fun openEmailUrl(context: Context, emailUrl: String) {
         // googlegmail:// scheme is iOS-only), so the VIEW intent above cannot
         // resolve. Open the app itself — landing in the inbox beats the desktop
         // web UI in a browser tab. Requires the <queries> entries in the manifest.
-        try {
-            val launch = context.packageManager.getLaunchIntentForPackage(nativePackage)
-            if (launch != null) {
-                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(launch)
-                return
-            }
-        } catch (_: Exception) {}
     }
-    // Last resort: any available handler (browser).
+    // Last resort: any available handler for the actual message URL.
     try {
         context.startActivity(
             Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
@@ -3352,13 +3587,15 @@ private tailrec fun Context.findActivity(): Activity? {
     }
 }
 
-private fun extractSharedImageUris(intent: Intent?): List<Uri> {
+private fun extractSharedReceiptImports(intent: Intent?): List<SharedReceiptImport> {
     if (intent == null) return emptyList()
-    return when (intent.action) {
+    val emailUrl = intent.originalEmailUrl()
+    val uris = when (intent.action) {
         Intent.ACTION_SEND -> listOfNotNull(intent.streamUri())
         Intent.ACTION_SEND_MULTIPLE -> intent.streamUris()
         else -> emptyList()
     }
+    return uris.map { uri -> SharedReceiptImport(uri, emailUrl) }
 }
 
 private fun Intent.streamUri(): Uri? {
@@ -3379,11 +3616,33 @@ private fun Intent.streamUris(): List<Uri> {
     }
 }
 
+private fun Intent.originalEmailUrl(): String? {
+    val text = listOfNotNull(
+        getStringExtra(Intent.EXTRA_TEXT),
+        getStringExtra(Intent.EXTRA_HTML_TEXT)
+    ).joinToString(" ")
+
+    return Regex("""https?://[^\s<>"']+""")
+        .findAll(text)
+        .map { it.value.trimEnd('.', ',', ')', ']') }
+        .firstOrNull { url ->
+            listOf("mail.google.com", "outlook.live.com", "outlook.office.com", "mail.yahoo.com")
+                .any { host -> url.contains(host, ignoreCase = true) }
+        }
+}
+
 private fun Long.formatDate(): String {
     return Instant.ofEpochMilli(this)
         .atZone(ZoneId.systemDefault())
         .toLocalDate()
-        .format(DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US))
+        .format(DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault()))
+}
+
+private fun Long.formatIsoDate(): String {
+    return Instant.ofEpochMilli(this)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDate()
+        .toString()
 }
 
 private fun LocalDate.toMillis(): Long {
@@ -3392,13 +3651,125 @@ private fun LocalDate.toMillis(): Long {
 
 private fun todayMillis(): Long = LocalDate.now().toMillis()
 
-private fun formatCurrency(cents: Long): String {
-    return NumberFormat.getCurrencyInstance(Locale.US).format(cents / 100.0)
+private fun formatReceiptTotal(receipts: List<Receipt>): String {
+    if (receipts.isEmpty()) return formatCurrency(0, defaultCurrencyCode())
+    val totals = receipts.groupBy { normalizeCurrencyCode(it.currencyCode) ?: defaultCurrencyCode() }
+        .mapValues { (_, values) -> values.sumOf { it.amountCents } }
+    if (totals.size == 1) {
+        val (currencyCode, cents) = totals.entries.first()
+        return formatCurrency(cents, currencyCode)
+    }
+    return "${totals.size} currencies"
+}
+
+private fun formatCurrency(cents: Long, currencyCode: String = defaultCurrencyCode()): String {
+    val currency = runCatching { Currency.getInstance(normalizeCurrencyCode(currencyCode) ?: defaultCurrencyCode()) }
+        .getOrElse { Currency.getInstance(defaultCurrencyCode()) }
+    return NumberFormat.getCurrencyInstance(Locale.getDefault()).apply {
+        this.currency = currency
+    }.format(cents / 100.0)
 }
 
 private fun String.toCents(): Long {
+    return toCentsOrNull() ?: 0L
+}
+
+private fun String.toCentsOrNull(): Long? {
     val clean = replace(",", "").trim()
-    return runCatching { (clean.toDouble() * 100).toLong() }.getOrDefault(0L)
+    if (clean.isBlank()) return null
+    val normalized = normalizeDecimalNumber(clean)
+    return runCatching { (normalized.toDouble() * 100).roundToLong() }.getOrNull()
+}
+
+private fun normalizeDecimalNumber(value: String): String {
+    val digits = value.filter { it.isDigit() || it == '.' || it == ',' }
+    val lastDot = digits.lastIndexOf('.')
+    val lastComma = digits.lastIndexOf(',')
+    val decimalSeparator = when {
+        lastDot >= 0 && lastComma >= 0 -> if (lastDot > lastComma) '.' else ','
+        lastComma >= 0 && digits.length - lastComma == 3 -> ','
+        lastDot >= 0 -> '.'
+        else -> null
+    }
+    return buildString {
+        digits.forEach { char ->
+            when {
+                char.isDigit() -> append(char)
+                decimalSeparator != null && char == decimalSeparator -> append('.')
+            }
+        }
+    }
+}
+
+private fun defaultCurrencyCode(): String {
+    return runCatching { Currency.getInstance(Locale.getDefault()).currencyCode }.getOrDefault("USD")
+}
+
+private fun normalizeCurrencyCode(value: String?): String? {
+    val normalized = value?.trim()?.uppercase(Locale.US).orEmpty()
+    if (normalized.length != 3) return null
+    return runCatching { Currency.getInstance(normalized).currencyCode }.getOrNull()
+}
+
+private fun String.toLocalDateOrNull(): LocalDate? {
+    return runCatching { LocalDate.parse(trim()) }.getOrNull()
+}
+
+private fun String.toBlankableDateMillis(): Long? {
+    val trimmed = trim()
+    if (trimmed.isBlank()) return 0L
+    return trimmed.toLocalDateOrNull()?.toMillis()
+}
+
+private fun List<Receipt>.searchReceipts(query: String): List<Receipt> {
+    val normalized = query.normalizeSearchText()
+    if (normalized.isBlank()) return this
+
+    val explicitCategory = normalized
+        .substringAfter("category:", "")
+        .substringBefore(" ")
+        .takeIf { it.isNotBlank() }
+    val terms = normalized
+        .replace("category:", " ")
+        .split(Regex("""\s+"""))
+        .filter { it.isNotBlank() && it !in SearchStopWords }
+    val knownCategories = map { it.category.normalizeSearchText() }.toSet()
+    val categoryTerm = explicitCategory ?: terms.firstOrNull { it in knownCategories }
+
+    if (categoryTerm != null) {
+        return filter { it.category.normalizeSearchText() == categoryTerm }
+    }
+
+    return filter { receipt ->
+        terms.all { term -> receipt.matchesSearchTerm(term) }
+    }
+}
+
+private val SearchStopWords = setOf("category", "categories", "receipt", "receipts")
+
+private fun Receipt.matchesSearchTerm(term: String): Boolean {
+    if (term == "warranty") return warrantyUntilMillis != null
+    if (term == "return") return returnByMillis != null
+    return listOf(
+        merchant,
+        category,
+        location,
+        notes,
+        purchaseDateLabel,
+        rawText
+    ).any { field -> field.normalizeSearchText().containsWholeSearchTerm(term) }
+}
+
+private fun String.normalizeSearchText(): String {
+    return lowercase(Locale.getDefault())
+        .replace(Regex("""[^a-z0-9:]+"""), " ")
+        .trim()
+}
+
+private fun String.containsWholeSearchTerm(term: String): Boolean {
+    return split(Regex("""\s+""")).any { token ->
+        token == term || token.startsWith("$term-")
+    }
 }
 
 private fun JSONObject.nullableLong(key: String): Long? {

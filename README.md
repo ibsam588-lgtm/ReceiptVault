@@ -88,8 +88,22 @@ Core promise:
 - GitHub Actions deploy workflow: `.github/workflows/cloudflare-worker.yml`.
 - Worker deploy branch: `codex/receiptvault-android`.
 - Auth: Firebase email/password plus Google SSO. Android release builds read
-  `GOOGLE_SIGN_IN_WEB_CLIENT_ID`, falling back to `GOOGLE_OAUTH_CLIENT_ID`, from
-  GitHub Actions secrets.
+  `GOOGLE_SIGN_IN_WEB_CLIENT_ID` from GitHub Actions secrets. If the secret is
+  not present, the app falls back to the Firebase-generated
+  `default_web_client_id` resource.
+
+Google SSO launch requirements:
+
+- Enable the Google provider in Firebase Authentication for
+  `receiptvault-corsair`.
+- Add the Play App Signing SHA-1 and SHA-256 for package
+  `com.corsairlabs.receiptvault` to the Firebase Android app. Add the local
+  debug SHA too if testing outside Play.
+- Download the refreshed `google-services.json` after adding the SHA values;
+  it should include OAuth clients instead of an empty `oauth_client` array.
+- Store the Firebase Web client ID as GitHub secret
+  `GOOGLE_SIGN_IN_WEB_CLIENT_ID`. Do not use the Gmail connector OAuth client
+  for app sign-in.
 
 ### Google SSO setup and troubleshooting
 
