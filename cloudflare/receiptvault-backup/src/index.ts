@@ -1551,6 +1551,37 @@ function isExcludedSender(from: string | undefined): boolean {
   );
 }
 
+const geminiResponseSchema = {
+  type: "OBJECT",
+  properties: {
+    isReceipt: { type: "BOOLEAN" },
+    merchant: { type: "STRING" },
+    total: { type: "NUMBER" },
+    purchaseDate: { type: "STRING" },
+    category: {
+      type: "STRING",
+      enum: [
+        "Groceries",
+        "Electronics",
+        "Home",
+        "Business",
+        "Shopping",
+        "Food",
+        "Travel",
+        "Health",
+        "Auto",
+        "Other",
+        "Uncategorized"
+      ]
+    },
+    warrantyCandidate: { type: "BOOLEAN" },
+    returnWindowDays: { type: "INTEGER" },
+    confidence: { type: "NUMBER" },
+    notes: { type: "STRING" }
+  },
+  required: ["isReceipt", "confidence", "category"]
+};
+
 async function categorizeReceipt(request: Request, env: Env): Promise<Response> {
   if (!env.GEMINI_API_KEY) {
     return json({ error: "ai_not_configured" }, 503);
@@ -1571,7 +1602,8 @@ async function categorizeReceipt(request: Request, env: Env): Promise<Response> 
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.1,
-        responseMimeType: "application/json"
+        responseMimeType: "application/json",
+        responseSchema: geminiResponseSchema
       }
     })
   });
@@ -1619,6 +1651,13 @@ function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): st
     '  "notes": string',
     "}",
     "",
+    "Category guidance:",
+    '- For government fees, municipal payments, taxes, tolls, DMV: use "Other"',
+    '- For utility bills (electric, gas, water, internet, phone): use "Home"',
+    '- For restaurants, cafes, fast food, coffee shops: use "Food"',
+    '- For department stores, retail, online shopping (non-grocery, non-electronics): use "Shopping"',
+    '- Only use "Business" for B2B purchases, office supplies, professional services, or vendor invoices',
+    "",
     `Email subject: ${body.emailSubject || ""}`,
     `Email from: ${body.emailFrom || ""}`,
     `Email date: ${body.emailDate || ""}`,
@@ -1648,7 +1687,11 @@ async function callGeminiForEmail(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1, responseMimeType: "application/json" }
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+          responseSchema: geminiResponseSchema
+        }
       })
     });
     if (!res.ok) return null;

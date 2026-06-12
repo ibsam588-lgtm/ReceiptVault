@@ -701,13 +701,15 @@ private fun HomeScreen(
                     modifier = Modifier.weight(1f),
                     label = "Returns open",
                     value = receipts.count { it.returnByMillis != null && it.returnByMillis >= todayMillis() }.toString(),
-                    accent = Teal
+                    accent = Teal,
+                    onClick = onWarranties
                 )
                 StatCard(
                     modifier = Modifier.weight(1f),
                     label = "Warranties",
                     value = receipts.count { it.warrantyUntilMillis != null }.toString(),
-                    accent = Amber
+                    accent = Amber,
+                    onClick = onWarranties
                 )
                 StatCard(
                     modifier = Modifier.weight(1f),
@@ -1874,8 +1876,18 @@ private fun buildTaxCsv(receipts: List<Receipt>): String {
 }
 
 @Composable
-private fun StatCard(modifier: Modifier, label: String, value: String, accent: Color) {
-    Card(modifier = modifier, shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+private fun StatCard(
+    modifier: Modifier,
+    label: String,
+    value: String,
+    accent: Color,
+    onClick: (() -> Unit)? = null
+) {
+    Card(
+        modifier = modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(Color.White)
+    ) {
         Column(Modifier.padding(12.dp)) {
             Box(
                 Modifier
@@ -3000,6 +3012,10 @@ private class ImageEnhancer(private val context: Context) {
 }
 
 private class ReceiptParser {
+    private val validCategories = setOf(
+        "Groceries", "Electronics", "Home", "Business", "Shopping",
+        "Food", "Travel", "Health", "Auto", "Other", "Uncategorized"
+    )
     private val moneyRegex = Regex("""\$?\s*([0-9]{1,4}(?:,[0-9]{3})*\.[0-9]{2})""")
     private val datePatterns = listOf(
         DateTimeFormatter.ofPattern("M/d/yyyy", Locale.US),
@@ -3071,7 +3087,7 @@ private class ReceiptParser {
         }
 
         val category = ai.category
-            ?.takeIf { it.length in 2..24 }
+            ?.takeIf { it in validCategories }
             ?: local.category
 
         val merchant = ai.merchant
@@ -3134,6 +3150,10 @@ private class ReceiptParser {
         return when {
             listOf("best buy", "apple", "phone", "laptop", "headphone", "charger", "electronics").any { text.contains(it) } -> "Electronics"
             listOf("costco", "kroger", "walmart", "grocery", "market", "food").any { text.contains(it) } -> "Groceries"
+            listOf("restaurant", "café", "cafe", "starbucks", "mcdonald", "pizza", "diner", "coffee").any { text.contains(it) } -> "Food"
+            listOf("uber", "lyft", "hotel", "airline", "airways", "delta", "southwest", "flight").any { text.contains(it) } -> "Travel"
+            listOf("cvs", "walgreens", "pharmacy", "doctor", "clinic", "hospital", "dental").any { text.contains(it) } -> "Health"
+            listOf("auto", "toyota", "ford", "honda", "gas station", "shell", "exxon", "chevron", "tire").any { text.contains(it) } -> "Auto"
             listOf("home depot", "lowe", "furniture", "appliance", "tool").any { text.contains(it) } -> "Home"
             listOf("office", "staples", "invoice", "client", "business").any { text.contains(it) } -> "Business"
             listOf("target", "amazon", "store").any { text.contains(it) } -> "Shopping"
