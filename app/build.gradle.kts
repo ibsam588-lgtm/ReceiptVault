@@ -95,6 +95,7 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.mlkit.text.recognition)
+    implementation(libs.mlkit.document.scanner)
     implementation(libs.play.billing)
     implementation(libs.play.services.auth)
     implementation(libs.androidx.work.runtime.ktx)

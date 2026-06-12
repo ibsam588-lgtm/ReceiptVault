@@ -17,11 +17,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -122,6 +125,9 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -234,6 +240,19 @@ private fun ReceiptVaultRoot(
         }
     }
 
+    // ML Kit Document Scanner result: live edge detection + auto-crop + manual crop UI.
+    val docScannerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+            val uri = scanResult?.pages?.firstOrNull()?.imageUri
+            if (uri != null) {
+                viewModel.launchImport(uri, ImportSource.Camera) { screen = AppScreen.Detail }
+            }
+        }
+    }
+
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             viewModel.launchImport(uri, ImportSource.Image) { screen = AppScreen.Detail }
@@ -310,9 +329,32 @@ private fun ReceiptVaultRoot(
                 currentScreen = screen,
                 onScreenChange = { screen = it },
                 onScan = {
-                    val uri = createCameraUri(context)
-                    cameraUri = uri
-                    cameraLauncher.launch(uri)
+                    val activity = context.findActivity()
+                    if (activity != null) {
+                        val options = GmsDocumentScannerOptions.Builder()
+                            .setGalleryImportAllowed(false)
+                            .setPageLimit(1)
+                            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+                            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                            .build()
+                        GmsDocumentScanning.getClient(options)
+                            .getStartScanIntent(activity)
+                            .addOnSuccessListener { intentSender ->
+                                docScannerLauncher.launch(
+                                    IntentSenderRequest.Builder(intentSender).build()
+                                )
+                            }
+                            .addOnFailureListener {
+                                // Fallback to the plain camera if the doc scanner is unavailable.
+                                val uri = createCameraUri(context)
+                                cameraUri = uri
+                                cameraLauncher.launch(uri)
+                            }
+                    } else {
+                        val uri = createCameraUri(context)
+                        cameraUri = uri
+                        cameraLauncher.launch(uri)
+                    }
                 },
                 onPickImage = { imagePicker.launch("image/*") },
                 onSignOut = {
@@ -420,7 +462,8 @@ private fun ReceiptVaultApp(
                     onSelect = {
                         viewModel.selectReceipt(it.id)
                         onScreenChange(AppScreen.Detail)
-                    }
+                    },
+                    onDeleteMultiple = { ids -> viewModel.deleteReceipts(ids) {} }
                 )
 
                 AppScreen.Warranties -> WarrantyScreen(receipts)
@@ -448,6 +491,11 @@ private fun ReceiptVaultApp(
                             viewModel.deleteReceipt(id) { onScreenChange(AppScreen.Home) }
                         } else {
                             onScreenChange(AppScreen.Home)
+                        }
+                    },
+                    onUpdateText = { text ->
+                        (viewModel.selectedReceipt?.id ?: receipts.firstOrNull()?.id)?.let { id ->
+                            viewModel.updateReceiptText(id, text)
                         }
                     }
                 )
@@ -770,8 +818,15 @@ private fun ImportScreen(onScan: () -> Unit, onPickImage: () -> Unit, onEmailAcc
 }
 
 @Composable
-private fun SearchScreen(receipts: List<Receipt>, onSelect: (Receipt) -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun SearchScreen(
+    receipts: List<Receipt>,
+    onSelect: (Receipt) -> Unit,
+    onDeleteMultiple: (List<String>) -> Unit
+) {
     var query by rememberSaveable { mutableStateOf("") }
+    var selectedIds by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
+    val inSelectMode = selectedIds.isNotEmpty()
     val filtered = remember(query, receipts) {
         receipts.filter { receipt ->
             val haystack = listOf(
@@ -785,35 +840,112 @@ private fun SearchScreen(receipts: List<Receipt>, onSelect: (Receipt) -> Unit) {
         }
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search store, item, date, category") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                singleLine = true
-            )
+    // Drop any selected ids that no longer exist (e.g. after a bulk delete).
+    LaunchedEffect(receipts) {
+        val existing = receipts.map { it.id }.toSet()
+        if (selectedIds.any { it !in existing }) {
+            selectedIds = selectedIds.intersect(existing)
         }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = { query = "" }, label = { Text("All") })
-                AssistChip(onClick = { query = "warranty" }, label = { Text("Warranty") })
-                AssistChip(onClick = { query = "business" }, label = { Text("Business") })
-            }
-        }
-        if (filtered.isEmpty()) {
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 18.dp,
+                end = 18.dp,
+                top = 18.dp,
+                bottom = if (inSelectMode) 96.dp else 18.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             item {
-                EmptySearchState()
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Search store, item, date, category") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true
+                )
             }
-        } else {
-            items(filtered, key = { it.id }) { receipt ->
-                ReceiptRow(receipt, onClick = { onSelect(receipt) })
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(onClick = { query = "" }, label = { Text("All") })
+                    AssistChip(onClick = { query = "warranty" }, label = { Text("Warranty") })
+                    AssistChip(onClick = { query = "business" }, label = { Text("Business") })
+                }
+            }
+            if (filtered.isEmpty()) {
+                item {
+                    EmptySearchState()
+                }
+            } else {
+                items(filtered, key = { it.id }) { receipt ->
+                    Box(
+                        modifier = Modifier.combinedClickable(
+                            onClick = {
+                                if (inSelectMode) {
+                                    selectedIds = if (receipt.id in selectedIds) {
+                                        selectedIds - receipt.id
+                                    } else {
+                                        selectedIds + receipt.id
+                                    }
+                                } else {
+                                    onSelect(receipt)
+                                }
+                            },
+                            onLongClick = { selectedIds = selectedIds + receipt.id }
+                        )
+                    ) {
+                        ReceiptRow(receipt, onClick = {})
+                        if (inSelectMode) {
+                            Checkbox(
+                                checked = receipt.id in selectedIds,
+                                onCheckedChange = { checked ->
+                                    selectedIds = if (checked) {
+                                        selectedIds + receipt.id
+                                    } else {
+                                        selectedIds - receipt.id
+                                    }
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .padding(end = 8.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (inSelectMode) {
+            Surface(
+                color = Color.White,
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { selectedIds = emptySet() },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Cancel") }
+                    Button(
+                        onClick = {
+                            onDeleteMultiple(selectedIds.toList())
+                            selectedIds = emptySet()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Coral),
+                        modifier = Modifier.weight(1f)
+                    ) { Text("Delete (${selectedIds.size})") }
+                }
             }
         }
     }
@@ -1316,7 +1448,12 @@ private fun BillingOfferCard(
 }
 
 @Composable
-private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete: () -> Unit) {
+private fun ReceiptDetailScreen(
+    receipt: Receipt?,
+    onBack: () -> Unit,
+    onDelete: () -> Unit,
+    onUpdateText: (String) -> Unit = {}
+) {
     if (receipt == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1326,6 +1463,8 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete:
         }
         return
     }
+
+    val context = LocalContext.current
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1340,7 +1479,15 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete:
                     Text(receipt.merchant, color = Muted, fontWeight = FontWeight.Bold)
                     Text(formatCurrency(receipt.amountCents), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
                 }
-                AssistChip(onClick = {}, label = { Text(receipt.source.label) })
+                AssistChip(
+                    onClick = {
+                        val url = receipt.emailUrl
+                        if (receipt.source == ImportSource.EmailShare && !url.isNullOrBlank()) {
+                            openEmailUrl(context, url)
+                        }
+                    },
+                    label = { Text(receipt.source.label) }
+                )
                 Spacer(Modifier.width(8.dp))
                 IconButton(onClick = onDelete) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete receipt", tint = Coral)
@@ -1353,7 +1500,6 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete:
         item {
             val emailUrl = receipt.emailUrl
             if (!emailUrl.isNullOrBlank()) {
-                val context = LocalContext.current
                 // X8: determine label from URL rather than hardcoding "Gmail"
                 val emailAppLabel = when {
                     emailUrl.contains("mail.google.com") -> "Opens in Gmail"
@@ -1365,15 +1511,9 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete:
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            // B5: guard against ActivityNotFoundException (no email app installed)
-                            try {
-                                context.startActivity(
-                                    android.content.Intent(
-                                        android.content.Intent.ACTION_VIEW,
-                                        android.net.Uri.parse(emailUrl)
-                                    )
-                                )
-                            } catch (_: Exception) { }
+                            // Prefer opening the email in its native app (Gmail/Outlook) rather
+                            // than a browser; openEmailUrl falls back gracefully.
+                            openEmailUrl(context, emailUrl)
                         },
                     shape = RoundedCornerShape(8.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White)
@@ -1406,15 +1546,44 @@ private fun ReceiptDetailScreen(receipt: Receipt?, onBack: () -> Unit, onDelete:
             }
         }
         item {
+            var editingText by rememberSaveable(receipt.id) { mutableStateOf(receipt.rawText) }
+            var isEditing by rememberSaveable(receipt.id) { mutableStateOf(false) }
             Card(shape = RoundedCornerShape(8.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("OCR text", fontWeight = FontWeight.ExtraBold)
-                    Text(
-                        receipt.rawText.ifBlank { "No text detected. The receipt image is still saved." },
-                        color = Muted,
-                        maxLines = 8,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Extracted text", fontWeight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+                        if (!isEditing) {
+                            TextButton(onClick = { editingText = receipt.rawText; isEditing = true }) {
+                                Text("Edit")
+                            }
+                        }
+                    }
+                    if (isEditing) {
+                        OutlinedTextField(
+                            value = editingText,
+                            onValueChange = { editingText = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 4,
+                            maxLines = 12,
+                            placeholder = { Text("Edit extracted text…") }
+                        )
+                        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                            TextButton(onClick = { editingText = receipt.rawText; isEditing = false }) {
+                                Text("Cancel")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Button(onClick = { onUpdateText(editingText); isEditing = false }) {
+                                Text("Save")
+                            }
+                        }
+                    } else {
+                        Text(
+                            receipt.rawText.ifBlank { "No text detected. The receipt image is still saved." },
+                            color = Muted,
+                            maxLines = 8,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -2320,6 +2489,28 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         onDeleted()
     }
 
+    fun deleteReceipts(ids: List<String>, onDeleted: () -> Unit) {
+        if (ids.isEmpty()) {
+            onDeleted()
+            return
+        }
+        var current = _receipts.value
+        for (id in ids) current = store.delete(id)
+        _receipts.value = current
+        if (selectedReceiptId in ids) {
+            selectedReceiptId = _receipts.value.firstOrNull()?.id
+        }
+        _message.value = "${ids.size} receipt${if (ids.size == 1) "" else "s"} deleted."
+        onDeleted()
+    }
+
+    fun updateReceiptText(id: String, newText: String) {
+        val updated = _receipts.value.map { r -> if (r.id == id) r.copy(rawText = newText) else r }
+        _receipts.value = updated
+        store.saveAll(updated)
+        _message.value = "Text updated."
+    }
+
     fun connectEmailProvider(provider: EmailProvider) {
         val result = connectorStore.connect(provider)
         _emailAccounts.value = result.accounts
@@ -2564,6 +2755,12 @@ internal class ReceiptStore(private val context: Context) {
             .sortedByDescending { it.purchasedAtMillis }
         prefs.edit().putString("receipts", JSONArray(updated.map { it.toJson() }).toString()).apply()
         return updated
+    }
+
+    @Synchronized
+    fun saveAll(receipts: List<Receipt>) {
+        val sorted = receipts.sortedByDescending { it.purchasedAtMillis }
+        prefs.edit().putString("receipts", JSONArray(sorted.map { it.toJson() }).toString()).apply()
     }
 
     // P3: wipe all local data when user deletes their account
@@ -3031,6 +3228,39 @@ enum class AppScreen(val title: String, val navLabel: String) {
     Analytics("Analytics", "Charts"),
     Plus("ReceiptVault Plus", "Plus"),
     Detail("Receipt", "Receipt")
+}
+
+private fun openEmailUrl(context: Context, emailUrl: String) {
+    // For Gmail URLs, try to open in the Gmail app directly (not a browser).
+    if (emailUrl.contains("mail.google.com")) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
+                setPackage("com.google.android.gm")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            return
+        } catch (_: Exception) {}
+    }
+    // For Outlook URLs, try the Outlook app.
+    if (emailUrl.contains("outlook.live.com") || emailUrl.contains("outlook.office.com")) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
+                setPackage("com.microsoft.office.outlook")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            return
+        } catch (_: Exception) {}
+    }
+    // Fallback: open in any available handler.
+    try {
+        context.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
+    } catch (_: Exception) {}
 }
 
 private fun createCameraUri(context: Context): Uri {
