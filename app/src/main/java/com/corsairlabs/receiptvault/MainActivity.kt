@@ -965,7 +965,8 @@ private fun SearchScreen(
 
 @Composable
 private fun WarrantyScreen(receipts: List<Receipt>, onSelect: (Receipt) -> Unit) {
-    val warranties = receipts.filter { it.warrantyUntilMillis != null || it.returnByMillis != null }
+    // Only receipts with an actual warranty date; return-only receipts don't belong here.
+    val warranties = receipts.filter { it.warrantyUntilMillis != null }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
