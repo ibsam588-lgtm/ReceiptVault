@@ -25,6 +25,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -73,6 +75,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -840,10 +843,14 @@ private fun SearchScreen(
     onDeleteMultiple: (List<String>) -> Unit
 ) {
     var query by rememberSaveable { mutableStateOf("") }
+    var dateFilterName by rememberSaveable { mutableStateOf(SearchDateFilter.All.name) }
+    var customStartDate by rememberSaveable { mutableStateOf("") }
+    var customEndDate by rememberSaveable { mutableStateOf("") }
     var selectedIds by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     val inSelectMode = selectedIds.isNotEmpty()
-    val filtered = remember(query, receipts) {
-        receipts.searchReceipts(query)
+    val dateFilter = remember(dateFilterName) { SearchDateFilter.fromName(dateFilterName) }
+    val filtered = remember(query, receipts, dateFilter, customStartDate, customEndDate) {
+        receipts.searchReceipts(query).filterByPurchasedDate(dateFilter, customStartDate, customEndDate)
     }
     val categories = remember(receipts) {
         receipts.map { it.category }
@@ -882,11 +889,56 @@ private fun SearchScreen(
                 )
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     AssistChip(onClick = { query = "" }, label = { Text("All") })
                     AssistChip(onClick = { query = "warranty" }, label = { Text("Warranty") })
                     categories.take(4).forEach { category ->
                         AssistChip(onClick = { query = "category:$category" }, label = { Text(category) })
+                    }
+                }
+            }
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SearchDateFilter.values().forEach { filter ->
+                        FilterChip(
+                            selected = dateFilter == filter,
+                            onClick = { dateFilterName = filter.name },
+                            label = { Text(filter.label) }
+                        )
+                    }
+                }
+            }
+            if (dateFilter == SearchDateFilter.Custom) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = customStartDate,
+                            onValueChange = { customStartDate = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("From") },
+                            placeholder = { Text("YYYY-MM-DD") },
+                            leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = customEndDate,
+                            onValueChange = { customEndDate = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("To") },
+                            placeholder = { Text("YYYY-MM-DD") },
+                            leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null) },
+                            singleLine = true
+                        )
                     }
                 }
             }
@@ -2775,6 +2827,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 // Import receipts returned by the Worker, skipping emails imported on a
                 // previous sync — a blind upsert would resurrect deleted receipts and
                 // overwrite local edits with the server copy on every sync.
+                var importedNow = 0
                 for (receiptJson in summary.receipts) {
                     runCatching {
                         val receipt = Receipt.fromJson(receiptJson)
@@ -2782,15 +2835,21 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                         if (!store.isEmailImported(emailKey)) {
                             _receipts.value = store.upsert(receipt)
                             store.markEmailImported(emailKey)
+                            importedNow++
                         }
                     }
+                }
+                val syncMessage = if (summary.imported > 0 && importedNow == 0) {
+                    "No new receipt emails to import."
+                } else {
+                    summary.message
                 }
                 val result = connectorStore.markSyncReady(
                     id = id,
                     scanned = summary.scanned,
                     candidates = summary.candidates,
-                    imported = summary.imported,
-                    message = summary.message
+                    imported = importedNow,
+                    message = syncMessage
                 )
                 _emailAccounts.value = result.accounts
                 _message.value = result.message
@@ -3255,12 +3314,6 @@ private class ReceiptParser {
         val purchasedAt = parseDate(lines) ?: LocalDate.now()
         val category = inferCategory(rawText, merchant)
         // Issue 3: do NOT auto-set returnByMillis — only set it via explicit user input or AI signal
-        val warrantyUntil = if (category in setOf("Electronics", "Home", "Business")) {
-            purchasedAt.plusYears(1)
-        } else {
-            null
-        }
-
         return ReceiptDraft(
             merchant = merchant.take(42),
             amountCents = amount,
@@ -3269,7 +3322,7 @@ private class ReceiptParser {
             category = category,
             location = inferLocation(lines),
             returnByMillis = null,
-            warrantyUntilMillis = warrantyUntil?.toMillis(),
+            warrantyUntilMillis = null,
             notes = if (rawText.isBlank()) "Manual review needed" else "OCR processed"
         )
     }
@@ -3295,11 +3348,9 @@ private class ReceiptParser {
             ?.takeIf { it in 1..365 }
             ?.let { purchasedAt.plusDays(it.toLong()).toMillis() }
 
-        val warrantyUntil = if (ai.warrantyCandidate) {
-            purchasedAt.plusYears(1).toMillis()
-        } else {
-            local.warrantyUntilMillis
-        }
+        // A warranty signal alone is not enough to invent a coverage date.
+        // Keep warranty empty unless the user sets it explicitly.
+        val warrantyUntil = local.warrantyUntilMillis
 
         val category = ai.category
             ?.takeIf { it in validCategories }
@@ -3541,32 +3592,27 @@ enum class AppScreen(val title: String, val navLabel: String) {
     Detail("Receipt", "Receipt")
 }
 
+private enum class SearchDateFilter(val label: String) {
+    All("Any date"),
+    Today("Today"),
+    Last7("7 days"),
+    Last30("30 days"),
+    ThisMonth("This month"),
+    ThisYear("This year"),
+    Custom("Custom");
+
+    companion object {
+        fun fromName(name: String): SearchDateFilter =
+            values().firstOrNull { it.name == name } ?: All
+    }
+}
+
 private fun openEmailUrl(context: Context, emailUrl: String) {
-    val nativePackage = when {
-        emailUrl.contains("mail.google.com") -> "com.google.android.gm"
-        emailUrl.contains("outlook.live.com") || emailUrl.contains("outlook.office.com") -> "com.microsoft.office.outlook"
-        else -> null
-    }
-    if (nativePackage != null) {
-        // First try handing the URL to the native app directly.
-        try {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
-                    setPackage(nativePackage)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-            )
-            return
-        } catch (_: Exception) {}
-        // Gmail has no intent filter for https://mail.google.com URLs (and the
-        // googlegmail:// scheme is iOS-only), so the VIEW intent above cannot
-        // resolve. Open the app itself — landing in the inbox beats the desktop
-        // web UI in a browser tab. Requires the <queries> entries in the manifest.
-    }
-    // Last resort: any available handler for the actual message URL.
+    val uri = runCatching { Uri.parse(emailUrl) }.getOrNull() ?: return
+    if (uri.scheme !in setOf("http", "https")) return
     try {
         context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(emailUrl)).apply {
+            Intent(Intent.ACTION_VIEW, uri).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         )
@@ -3742,6 +3788,36 @@ private fun List<Receipt>.searchReceipts(query: String): List<Receipt> {
 
     return filter { receipt ->
         terms.all { term -> receipt.matchesSearchTerm(term) }
+    }
+}
+
+private fun List<Receipt>.filterByPurchasedDate(
+    filter: SearchDateFilter,
+    customStartDate: String,
+    customEndDate: String
+): List<Receipt> {
+    val today = LocalDate.now()
+    val range = when (filter) {
+        SearchDateFilter.All -> return this
+        SearchDateFilter.Today -> today to today
+        SearchDateFilter.Last7 -> today.minusDays(6) to today
+        SearchDateFilter.Last30 -> today.minusDays(29) to today
+        SearchDateFilter.ThisMonth -> today.withDayOfMonth(1) to today
+        SearchDateFilter.ThisYear -> today.withDayOfYear(1) to today
+        SearchDateFilter.Custom -> {
+            val start = customStartDate.toLocalDateOrNull()
+            val end = customEndDate.toLocalDateOrNull()
+            if (start == null && end == null) return this
+            (start ?: LocalDate.MIN) to (end ?: LocalDate.MAX)
+        }
+    }
+    val start = if (range.first.isAfter(range.second)) range.second else range.first
+    val end = if (range.first.isAfter(range.second)) range.first else range.second
+    return filter { receipt ->
+        val purchasedAt = Instant.ofEpochMilli(receipt.purchasedAtMillis)
+            .atZone(ZoneId.systemDefault())
+            .toLocalDate()
+        !purchasedAt.isBefore(start) && !purchasedAt.isAfter(end)
     }
 }
 

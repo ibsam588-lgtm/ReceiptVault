@@ -103,6 +103,7 @@ type ProviderMessageCandidate = {
   date?: string;
   snippet?: string;
   hasAttachments?: boolean;
+  webUrl?: string;
 };
 
 type ConnectorSyncReport = {
@@ -977,7 +978,7 @@ async function syncProviderForUser(
     if (!refreshed.access_token) return syncError(providerId, syncedAt, "missing_access_token");
 
     const candidates = providerId === "gmail"
-      ? await fetchGmailCandidates(provider, refreshed.access_token, maxCandidates, paginate)
+      ? await fetchGmailCandidates(provider, refreshed.access_token, maxCandidates, paginate, metadata.emailAddress)
       : await fetchOutlookCandidates(provider, refreshed.access_token, maxCandidates);
     const receiptCandidates = candidates
       .filter((candidate) => !isExcludedSender(candidate.from))
@@ -991,8 +992,12 @@ async function syncProviderForUser(
     // Fetch full body for each receipt candidate and create receipt records
     const importedReceipts: Record<string, unknown>[] = [];
     for (const candidate of receiptCandidates) {
-      // Use provider-prefixed message ID as receipt ID so duplicate syncs overwrite instead of duplicate
+      // Use provider-prefixed message ID as receipt ID so duplicate syncs can be skipped.
       const receiptId = `${providerId}-${candidate.id}`;
+      const objectName = receiptMetadataObjectName(userId, receiptId);
+      const existing = await env.RECEIPTS_BUCKET.head(objectName);
+      if (existing) continue;
+
       const bodyText = providerId === "gmail"
         ? await fetchGmailMessageFullText(refreshed.access_token as string, candidate.id)
         : candidate.snippet || "";
@@ -1035,14 +1040,14 @@ async function syncProviderForUser(
         rawText: "",
         imagePath: "",
         source: "EmailShare",
-        emailUrl: providerId === "gmail"
+        emailUrl: candidate.webUrl || (providerId === "gmail"
           ? `https://mail.google.com/mail/u/0/#all/${candidate.id}`
           : providerId === "outlook"
           ? `https://outlook.live.com/mail/0/inbox/id/${encodeURIComponent(candidate.id)}`
-          : null
+          : null)
       };
       await env.RECEIPTS_BUCKET.put(
-        `users/${userId}/receipts/${receiptId}/metadata.json`,
+        objectName,
         JSON.stringify(receipt),
         { httpMetadata: { contentType: "application/json" } }
       );
@@ -1062,6 +1067,8 @@ async function syncProviderForUser(
       plan,
       message: importedReceipts.length > 0
         ? `Imported ${importedReceipts.length} receipt${importedReceipts.length === 1 ? "" : "s"} from ${candidates.length} scanned messages.`
+        : receiptCandidates.length > 0
+        ? `Scanned ${candidates.length} messages; no new receipt emails to import.`
         : `Scanned ${candidates.length} messages; none matched receipt signals strongly enough to import.`
     };
   } catch (error) {
@@ -1143,7 +1150,8 @@ async function fetchGmailCandidates(
   provider: OAuthProviderConfig,
   accessToken: string,
   maxCandidates: number,
-  paginate = false
+  paginate = false,
+  accountEmail?: string
 ): Promise<ProviderMessageCandidate[]> {
   const candidates: ProviderMessageCandidate[] = [];
   let pageToken: string | undefined;
@@ -1175,13 +1183,19 @@ async function fetchGmailCandidates(
       if (!detailResponse.ok) continue;
       const detail: Record<string, unknown> = await detailResponse.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
       const headers = gmailHeaders(detail);
+      const threadId = typeof detail.threadId === "string" ? detail.threadId : id;
+      const encodedThreadId = encodeURIComponent(threadId);
+      const webUrl = accountEmail
+        ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(accountEmail)}#all/${encodedThreadId}`
+        : `https://mail.google.com/mail/u/0/#all/${encodedThreadId}`;
       candidates.push({
         id,
         subject: headers.Subject,
         from: headers.From,
         date: headers.Date,
         snippet: typeof detail.snippet === "string" ? detail.snippet : "",
-        hasAttachments: false
+        hasAttachments: false,
+        webUrl
       });
     }
 
@@ -1280,7 +1294,7 @@ async function fetchOutlookCandidates(
 ): Promise<ProviderMessageCandidate[]> {
   const searchUrl = new URL("https://graph.microsoft.com/v1.0/me/messages");
   searchUrl.searchParams.set("$top", String(maxCandidates));
-  searchUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments");
+  searchUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments,webLink");
   searchUrl.searchParams.set("$search", "\"receipt OR order OR invoice OR purchase confirmation OR warranty OR bill OR statement\"");
 
   let response = await fetch(searchUrl, {
@@ -1290,7 +1304,7 @@ async function fetchOutlookCandidates(
   if (!response.ok) {
     const fallbackUrl = new URL("https://graph.microsoft.com/v1.0/me/messages");
     fallbackUrl.searchParams.set("$top", String(maxCandidates));
-    fallbackUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments");
+    fallbackUrl.searchParams.set("$select", "id,subject,from,receivedDateTime,bodyPreview,hasAttachments,webLink");
     fallbackUrl.searchParams.set("$orderby", "receivedDateTime desc");
     response = await fetch(fallbackUrl, {
       headers: { authorization: `Bearer ${accessToken}` }
@@ -1310,7 +1324,8 @@ async function fetchOutlookCandidates(
       from,
       date: typeof message.receivedDateTime === "string" ? message.receivedDateTime : "",
       snippet: typeof message.bodyPreview === "string" ? message.bodyPreview : "",
-      hasAttachments: message.hasAttachments === true
+      hasAttachments: message.hasAttachments === true,
+      webUrl: typeof message.webLink === "string" ? message.webLink : undefined
     };
   });
 }
@@ -1343,6 +1358,10 @@ async function listConnectorSyncReports(env: Env, user: JWTPayload): Promise<Res
 
 function connectorSyncReportObjectName(userId: string, provider: ConnectorProviderId): string {
   return `users/${userId}/connectors/${provider}/last-sync.json`;
+}
+
+function receiptMetadataObjectName(userId: string, receiptId: string): string {
+  return `users/${userId}/receipts/${receiptId}/metadata.json`;
 }
 
 async function indexConnectorUser(env: Env, userId: string): Promise<void> {
@@ -1637,6 +1656,8 @@ function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): st
     "You classify receipt or order text for ReceiptVault.",
     "Use only the provided receipt/order text and optional email headers.",
     "If the text is not a receipt, order, invoice, return, or warranty record, set isReceipt to false and confidence to 0.3 or lower.",
+    "Set warrantyCandidate true only when the text explicitly says warranty, guarantee, protection plan, or coverage for a product or service.",
+    "Do not infer warranty from category, card/bank receipts, or standard return/exchange wording.",
     "Do not include unrelated email content. Return only JSON.",
     "",
     "JSON schema:",
