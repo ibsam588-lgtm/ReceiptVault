@@ -272,7 +272,9 @@ private fun ReceiptVaultRoot(
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
     var showExitDialog by rememberSaveable { mutableStateOf(false) }
 
-    // Issue 4: ask user before quitting from the home/root screen
+    // Back from any non-Home screen returns to Home; the app never exits from a
+    // stray back press/gesture. Only Home asks the user before quitting (Issue 4).
+    BackHandler(enabled = screen != AppScreen.Home) { screen = AppScreen.Home }
     BackHandler(enabled = screen == AppScreen.Home) { showExitDialog = true }
 
     ReceiptVaultTheme {
