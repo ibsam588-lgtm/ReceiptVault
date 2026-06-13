@@ -216,20 +216,20 @@ function Screenshot-Home {
     Draw-AppShell $g "home" "sams@example.com"
     Fill-RoundRect $g (Brush $Dark) 54 215 972 292 18
     Draw-Text $g "Total tracked" (Font 31 Regular) (Brush ([System.Drawing.Color]::FromArgb(190, 255, 255, 255))) 104 268 420 44
-    Draw-Text $g "PKR 2,721.00" (Font 56 Bold) (Brush $White) 104 324 560 72
+    Draw-Text $g '$344.52' (Font 56 Bold) (Brush $White) 104 324 560 72
     Draw-Text $g "4 receipts saved" (Font 30 Regular) (Brush ([System.Drawing.Color]::FromArgb(190, 255, 255, 255))) 104 402 360 44
     Fill-RoundRect $g (Brush $White) 776 246 138 54 18
-    Draw-Text $g "PKR" (Font 26 Bold) (Brush $TealDark) 796 256 98 34 "Center"
+    Draw-Text $g "USD" (Font 26 Bold) (Brush $TealDark) 796 256 98 34 "Center"
     Fill-RoundRect $g (Brush $Teal) 786 330 142 142 71
     Draw-Icon $g "camera" 824 366 $White
     Draw-Card $g 54 558 466 260 "Upload image" "Gallery or files" "camera"
     Draw-Card $g 560 558 466 260 "Email import" "Auto or share" "email"
     Draw-Text $g "Recent receipts" (Font 34 Bold) (Brush $Ink) 54 892 420 48
     Draw-Text $g "Search" (Font 28 Bold) (Brush $TealDark) 832 894 150 42 "Far"
-    Draw-ReceiptRow $g 54 966 "Town of Leesburg" "Bill - Home - Jun 13, 2026" '$299.21'
-    Draw-ReceiptRow $g 54 1106 "M STORE" "Receipt - Shopping - Jun 11, 2026" "PKR 1,200.00" $Amber
-    Draw-ReceiptRow $g 54 1246 "Amazon" "Order - Shopping - Jun 9, 2026" '$48.15' $Blue
-    Draw-Header $g "Track every receipt in any currency" "Choose your default currency once. Scans, uploads, OCR and email imports follow it."
+    Draw-ReceiptRow $g 54 966 "City Utilities" "Bill - Home - Jun 13, 2026" '$142.38'
+    Draw-ReceiptRow $g 54 1106 "Home Internet" "Bill - Home - Jun 11, 2026" '$89.99' $Amber
+    Draw-ReceiptRow $g 54 1246 "Northside Grocer" "Receipt - Groceries - Jun 9, 2026" '$48.15' $Blue
+    Draw-Header $g "Track bills and receipts in USD" "USD is used for scans, uploads, OCR and email imports."
     $g.Dispose(); Save-Png $bmp (Join-Path $phoneDir "01-home-currency.png")
 }
 
@@ -239,15 +239,15 @@ function Screenshot-Scan {
     Draw-Header $g "Scan or upload purchase documents" "ReceiptVault reads totals, dates, stores and categories from receipts, bills and orders."
     Fill-RoundRect $g (Brush $White) 74 300 932 1040 24
     Fill-RoundRect $g (Brush ([System.Drawing.Color]::FromArgb(250, 250, 250))) 160 382 760 560 18
-    Draw-Text $g "Bank AL Habib Ltd." (Font 36 Bold) (Brush $Ink) 245 438 590 50 "Center"
-    Draw-Text $g "keenu" (Font 88 Bold) (Brush $Ink) 322 492 430 118 "Center"
-    Draw-Text $g "M STORE`nDATE: 11-06-2026`nTOTAL AMOUNT: RS. 1,200.00`nCARDHOLDER VISA`nCUSTOMER COPY" (Font 31 Regular) (Brush $Ink) 230 636 620 250 "Center"
+    Draw-Text $g "City Utilities" (Font 42 Bold) (Brush $Ink) 245 432 590 56 "Center"
+    Draw-Text $g "Monthly Bill" (Font 60 Bold) (Brush $Ink) 272 500 540 82 "Center"
+    Draw-Text $g "ACCOUNT: 1029-4481`nBILL DATE: 06-13-2026`nDUE DATE: 06-28-2026`nAMOUNT DUE: `$142.38`nSERVICE: WATER + ELECTRIC" (Font 31 Regular) (Brush $Ink) 220 632 640 270 "Center"
     Fill-RoundRect $g (Brush ([System.Drawing.Color]::FromArgb(235, 248, 246))) 124 990 390 190 18
     Draw-Text $g "Purchased" (Font 25 Bold) (Brush $Muted) 158 1025 300 34
-    Draw-Text $g "Jun 11, 2026" (Font 37 Bold) (Brush $Ink) 158 1072 310 50
+    Draw-Text $g "Jun 13, 2026" (Font 37 Bold) (Brush $Ink) 158 1072 310 50
     Fill-RoundRect $g (Brush ([System.Drawing.Color]::FromArgb(235, 248, 246))) 566 990 390 190 18
     Draw-Text $g "Category" (Font 25 Bold) (Brush $Muted) 600 1025 300 34
-    Draw-Text $g "Shopping" (Font 37 Bold) (Brush $Ink) 600 1072 310 50
+    Draw-Text $g "Home" (Font 37 Bold) (Brush $Ink) 600 1072 310 50
     Fill-RoundRect $g (Brush $Teal) 220 1230 640 82 24
     Draw-Text $g "OCR text saved with the receipt" (Font 31 Bold) (Brush $White) 260 1248 560 42 "Center"
     Draw-AppShell $g "camera"
@@ -323,9 +323,9 @@ function Screenshot-Search {
         Fill-RoundRect $g (Brush $fill) $x $y 206 62 16
         Draw-Text $g $chips[$i] (Font 25 Bold) (Brush $Ink) $x ($y + 14) 206 34 "Center"
     }
-    Draw-ReceiptRow $g 54 690 "Town of Leesburg" "Home - Jun 13, 2026" '$299.21'
-    Draw-ReceiptRow $g 54 830 "M STORE" "Shopping - Jun 11, 2026" "PKR 1,200.00" $Amber
-    Draw-ReceiptRow $g 54 970 "Amazon" "Shopping - Jun 9, 2026" '$48.15' $Blue
+    Draw-ReceiptRow $g 54 690 "City Utilities" "Home - Jun 13, 2026" '$142.38'
+    Draw-ReceiptRow $g 54 830 "Home Internet" "Home - Jun 11, 2026" '$89.99' $Amber
+    Draw-ReceiptRow $g 54 970 "Northside Grocer" "Groceries - Jun 9, 2026" '$48.15' $Blue
     Fill-RoundRect $g (Brush $White) 54 1540 972 120 18
     Draw-Text $g "Select all" (Font 30 Bold) (Brush $TealDark) 92 1578 220 40
     Fill-RoundRect $g (Brush $Coral) 612 1560 360 76 38
@@ -340,11 +340,11 @@ function Screenshot-Warranty {
     Draw-Header $g "Track returns and warranties" "Keep dates attached to the receipt so proof is ready when something breaks or needs returning."
     Fill-RoundRect $g (Brush ([System.Drawing.Color]::FromArgb(74, 95, 51))) 54 308 972 214 18
     Draw-Text $g "Coverage value" (Font 31 Regular) (Brush ([System.Drawing.Color]::FromArgb(205, 255, 255, 255))) 104 360 420 44
-    Draw-Text $g '$1,897.63' (Font 58 Bold) (Brush $White) 104 410 460 72
+    Draw-Text $g '$1,245.62' (Font 58 Bold) (Brush $White) 104 410 460 72
     Draw-Icon $g "shield" 850 374 ([System.Drawing.Color]::FromArgb(216, 246, 175))
-    Draw-ReceiptRow $g 54 600 "Apple Store" "Return: Jul 12, 2026 | Warranty: Jun 12, 2027" '$899.00' $Blue
-    Draw-ReceiptRow $g 54 740 "M STORE" "Return: Not set | Warranty: Nov 6, 2027" "PKR 1,200.00" $Amber
-    Draw-ReceiptRow $g 54 880 "Best Buy" "Return: Jun 30, 2026 | Warranty: Jun 12, 2028" '$998.63'
+    Draw-ReceiptRow $g 54 600 "Laptop Outlet" "Return: Jul 12, 2026 | Warranty: Jun 12, 2027" '$699.00' $Blue
+    Draw-ReceiptRow $g 54 740 "Appliance Depot" "Return: Not set | Warranty: Nov 6, 2027" '$248.25' $Amber
+    Draw-ReceiptRow $g 54 880 "Best Buy" "Return: Jun 30, 2026 | Warranty: Jun 12, 2028" '$298.37'
     Draw-AppShell $g "shield"
     $g.Dispose(); Save-Png $bmp (Join-Path $phoneDir "06-warranties-returns.png")
 }
@@ -354,8 +354,8 @@ function Screenshot-Analytics {
     $bmp = $pair[0]; $g = $pair[1]
     Draw-Header $g "Analytics by selected currency" "Separate totals by currency and understand where spending is going."
     $stats = @(
-        @("PKR 2,721.00", "Total spent", $Teal),
-        @("PKR 680.25", "Avg receipt", $Coral),
+        @('$344.52', "Total spent", $Teal),
+        @('$86.13', "Avg receipt", $Coral),
         @("4", "Receipts", $Amber),
         @("4", "Categorized", $Blue),
         @("1", "Returns", $Teal),
@@ -382,9 +382,9 @@ function Screenshot-Analytics {
     $g.FillPie((Brush $Coral), 136, 1260, 250, 250, 120, 90)
     $g.FillPie((Brush $Amber), 136, 1260, 250, 250, 210, 60)
     $g.FillEllipse((Brush $White), 205, 1329, 112, 112)
-    Draw-Text $g "Groceries   PKR 1,421" (Font 28 Bold) (Brush $Ink) 460 1290 470 40
-    Draw-Text $g "Home        PKR 897" (Font 28 Bold) (Brush $Ink) 460 1355 470 40
-    Draw-Text $g "Shopping    PKR 403" (Font 28 Bold) (Brush $Ink) 460 1420 470 40
+    Draw-Text $g 'Home        $232.37' (Font 28 Bold) (Brush $Ink) 460 1290 470 40
+    Draw-Text $g 'Groceries   $48.15' (Font 28 Bold) (Brush $Ink) 460 1355 470 40
+    Draw-Text $g 'Services    $64.00' (Font 28 Bold) (Brush $Ink) 460 1420 470 40
     Draw-AppShell $g "chart"
     $g.Dispose(); Save-Png $bmp (Join-Path $phoneDir "07-analytics.png")
 }
