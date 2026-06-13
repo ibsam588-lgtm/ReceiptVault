@@ -24,9 +24,6 @@ val admobBannerAdUnitId = providers.environmentVariable("ADMOB_BANNER_AD_UNIT_ID
 val admobInterstitialAdUnitId = providers.environmentVariable("ADMOB_INTERSTITIAL_AD_UNIT_ID").orNull
     ?: providers.gradleProperty("ADMOB_INTERSTITIAL_AD_UNIT_ID").orNull
     ?: "ca-app-pub-3940256099942544/1033173712"
-val admobRewardedInterstitialAdUnitId = providers.environmentVariable("ADMOB_REWARDED_INTERSTITIAL_AD_UNIT_ID").orNull
-    ?: providers.gradleProperty("ADMOB_REWARDED_INTERSTITIAL_AD_UNIT_ID").orNull
-    ?: "ca-app-pub-3940256099942544/5354046379"
 
 if (googleSignInWebClientId.isBlank()) {
     logger.warn(
@@ -51,7 +48,6 @@ android {
         buildConfigField("String", "GOOGLE_SIGN_IN_WEB_CLIENT_ID", "\"${googleSignInWebClientId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "ADMOB_BANNER_AD_UNIT_ID", "\"${admobBannerAdUnitId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "ADMOB_INTERSTITIAL_AD_UNIT_ID", "\"${admobInterstitialAdUnitId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
-        buildConfigField("String", "ADMOB_REWARDED_INTERSTITIAL_AD_UNIT_ID", "\"${admobRewardedInterstitialAdUnitId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         manifestPlaceholders["ADMOB_APP_ID"] = admobAppId
     }
 

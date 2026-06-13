@@ -16,7 +16,8 @@ const products = [
     benefits: [
       "No ads",
       "Cloud receipt backup",
-      "Multiple email imports",
+      "3 email connectors",
+      "Unlimited manual uploads",
       "Smart categorization",
       "Warranty tracking"
     ]
@@ -31,7 +32,8 @@ const products = [
     benefits: [
       "No ads",
       "Cloud receipt backup",
-      "Multiple email imports",
+      "3 email connectors",
+      "Unlimited manual uploads",
       "Smart categorization",
       "Warranty tracking"
     ]
@@ -45,8 +47,9 @@ const products = [
     price: "12.99",
     benefits: [
       "No ads",
-      "Higher import limits",
+      "10 email connectors",
       "Business receipt backup",
+      "Unlimited manual uploads",
       "Smart categorization",
       "Warranty tracking"
     ]
@@ -60,8 +63,9 @@ const products = [
     price: "124.99",
     benefits: [
       "No ads",
-      "Higher import limits",
+      "10 email connectors",
       "Business receipt backup",
+      "Unlimited manual uploads",
       "Smart categorization",
       "Warranty tracking"
     ]

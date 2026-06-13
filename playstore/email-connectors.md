@@ -9,10 +9,10 @@ automatic imports must be implemented as receipt-only processing.
 - Users can connect multiple accounts across supported providers.
 - Free users get 1 connected account and 10 automatic receipt/order imports per
   month.
-- Plus users get up to 3 connected accounts and 250 automatic receipt/order
-  imports per month.
-- Business users get up to 10 connected accounts and 1,000 automatic
-  receipt/order imports per month.
+- Plus users get up to 3 connected email connectors and paid automatic
+  receipt/order imports.
+- Business users get up to 10 connected email connectors and expanded
+  automatic receipt/order imports.
 - Every connected account must show provider, email address, last sync time,
   monthly import count, sync status, disconnect, and delete imported data.
 

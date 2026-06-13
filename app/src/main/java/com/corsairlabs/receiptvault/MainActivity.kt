@@ -77,6 +77,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -405,6 +407,7 @@ private fun ReceiptVaultApp(
     val emailAccounts by viewModel.emailAccounts.collectAsState()
     val activePlan by viewModel.activePlan.collectAsState()
     val billingState by viewModel.billingState.collectAsState()
+    val preferredCurrency by viewModel.preferredCurrency.collectAsState()
     val isBusy by viewModel.isBusy.collectAsState()
     val message by viewModel.message.collectAsState()
     val pendingExternalUrl by viewModel.pendingExternalUrl.collectAsState()
@@ -489,6 +492,8 @@ private fun ReceiptVaultApp(
             when (currentScreen) {
                 AppScreen.Home -> HomeScreen(
                     receipts = receipts,
+                    preferredCurrency = preferredCurrency,
+                    onCurrencyChange = viewModel::setPreferredCurrency,
                     onScan = onScan,
                     onPickImage = onPickImage,
                     onSelect = {
@@ -522,7 +527,11 @@ private fun ReceiptVaultApp(
                         onScreenChange(AppScreen.Detail)
                     }
                 )
-                AppScreen.Analytics -> AnalyticsScreen(receipts = receipts, activePlan = activePlan)
+                AppScreen.Analytics -> AnalyticsScreen(
+                    receipts = receipts,
+                    activePlan = activePlan,
+                    preferredCurrency = preferredCurrency
+                )
                 AppScreen.Email -> EmailConnectorsScreen(
                     accounts = emailAccounts,
                     plan = activePlan,
@@ -710,6 +719,8 @@ private fun AppTopBar(
 @Composable
 private fun HomeScreen(
     receipts: List<Receipt>,
+    preferredCurrency: String,
+    onCurrencyChange: (String) -> Unit,
     onScan: () -> Unit,
     onPickImage: () -> Unit,
     onSelect: (Receipt) -> Unit,
@@ -717,23 +728,31 @@ private fun HomeScreen(
     onEmail: () -> Unit,
     onWarranties: () -> Unit
 ) {
-    val totalLabel = formatReceiptTotal(receipts)
+    val selectedCurrency = normalizeCurrencyCode(preferredCurrency) ?: defaultCurrencyCode()
+    val currencyReceipts = receipts.filter { it.normalizedCurrencyCode == selectedCurrency }
+    val totalLabel = formatReceiptTotal(currencyReceipts, selectedCurrency)
     // B16: filter to current calendar month so "This month" is accurate
     val thisMonthReceipts = run {
         val now = LocalDate.now()
-        receipts.filter {
+        currencyReceipts.filter {
             val d = Instant.ofEpochMilli(it.purchasedAtMillis).atZone(ZoneId.systemDefault()).toLocalDate()
             d.year == now.year && d.monthValue == now.monthValue
         }
     }
-    val thisMonthLabel = formatReceiptTotal(thisMonthReceipts)
+    val thisMonthLabel = formatReceiptTotal(thisMonthReceipts, selectedCurrency)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            VaultHero(totalLabel, receipts.size, onScan)
+            VaultHero(
+                totalLabel = totalLabel,
+                count = receipts.size,
+                selectedCurrency = selectedCurrency,
+                onCurrencyChange = onCurrencyChange,
+                onScan = onScan
+            )
         }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -799,7 +818,13 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun VaultHero(totalLabel: String, count: Int, onScan: () -> Unit) {
+private fun VaultHero(
+    totalLabel: String,
+    count: Int,
+    selectedCurrency: String,
+    onCurrencyChange: (String) -> Unit,
+    onScan: () -> Unit
+) {
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF173943)),
         shape = RoundedCornerShape(8.dp)
@@ -811,24 +836,73 @@ private fun VaultHero(totalLabel: String, count: Int, onScan: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text("Total tracked", color = Color.White.copy(alpha = 0.72f))
                 Text(
                     totalLabel,
                     color = Color.White,
                     style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.ExtraBold
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text("$count receipts saved", color = Color.White.copy(alpha = 0.72f))
             }
-            Button(
-                onClick = onScan,
-                colors = ButtonDefaults.buttonColors(containerColor = Teal),
-                shape = CircleShape,
-                contentPadding = PaddingValues(0.dp),
-                modifier = Modifier.size(68.dp)
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Icon(Icons.Default.PhotoCamera, contentDescription = "Scan receipt")
+                CurrencySelector(
+                    selectedCurrency = selectedCurrency,
+                    onCurrencyChange = onCurrencyChange,
+                    light = true
+                )
+                Button(
+                    onClick = onScan,
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal),
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier.size(68.dp)
+                ) {
+                    Icon(Icons.Default.PhotoCamera, contentDescription = "Scan receipt")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CurrencySelector(
+    selectedCurrency: String,
+    onCurrencyChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    light: Boolean = false
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            shape = RoundedCornerShape(8.dp),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = if (light) Color.White else TealDark
+            ),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+            modifier = Modifier.height(36.dp)
+        ) {
+            Text(selectedCurrency, fontWeight = FontWeight.Bold)
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            supportedCurrencyCodes().forEach { code ->
+                DropdownMenuItem(
+                    text = { Text(code) },
+                    onClick = {
+                        expanded = false
+                        onCurrencyChange(code)
+                    }
+                )
             }
         }
     }
@@ -1172,9 +1246,9 @@ private fun EmailConnectorsScreen(
                     modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Email receipt import", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                    Text("Email connectors", color = Color.White, fontWeight = FontWeight.ExtraBold)
                     Text(
-                        "${plan.label}: ${accounts.count { it.status != ConnectorStatus.Disconnected }}/${plan.maxEmailAccounts} accounts, ${plan.monthlyEmailImports} imports monthly",
+                        "${plan.label}: ${accounts.count { it.status != ConnectorStatus.Disconnected }}/${plan.maxEmailAccounts} connected email connectors",
                         color = Color.White.copy(alpha = 0.78f),
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1188,7 +1262,7 @@ private fun EmailConnectorsScreen(
         }
 
         item {
-            SectionHeader("Connect accounts", "Plan limits", onPlusScreen)
+            SectionHeader("Connect email connectors", "Plan", onPlusScreen)
         }
 
         item {
@@ -1235,7 +1309,7 @@ private fun EmailConnectorsScreen(
             item {
                 Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
                     Text(
-                        "No email accounts connected yet. Add Gmail, Outlook, Yahoo, or IMAP to prepare automatic receipt imports.",
+                        "No email connectors connected yet. Add Gmail, Outlook, Yahoo, or IMAP to prepare automatic receipt imports.",
                         modifier = Modifier.padding(18.dp),
                         color = Muted
                     )
@@ -1581,12 +1655,11 @@ private fun PlusScreen(
                 }
             )
         }
-        item { FeatureRow("1,000 stored receipts", Icons.Default.CheckCircle) }
+        item { FeatureRow("Unlimited manual receipt uploads", Icons.Default.CheckCircle) }
         item { FeatureRow("Cloud backup", Icons.Default.Shield) }
         item { FeatureRow("No banner or video ads", Icons.Default.CheckCircle) }
         item { FeatureRow("AI receipt categorization", Icons.Default.Star) }
-        item { FeatureRow("3 connected email accounts", Icons.Default.Email) }
-        item { FeatureRow("250 receipt email imports monthly", Icons.Default.Email) }
+        item { FeatureRow("3 connected email connectors", Icons.Default.Email) }
         item { FeatureRow("Auto email sync every 15 minutes", Icons.Default.Notifications) }
         item { FeatureRow("Unlimited warranty tracking", Icons.Default.Shield) }
         item { FeatureRow("Return and warranty reminders", Icons.Default.DateRange) }
@@ -2058,7 +2131,13 @@ private fun ImportCard(
 }
 
 @Composable
-private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPlan = ReceiptVaultPlan.Free) {
+private fun AnalyticsScreen(
+    receipts: List<Receipt>,
+    activePlan: ReceiptVaultPlan = ReceiptVaultPlan.Free,
+    preferredCurrency: String = defaultCurrencyCode()
+) {
+    val selectedCurrency = normalizeCurrencyCode(preferredCurrency) ?: defaultCurrencyCode()
+    val currencyReceipts = receipts.filter { it.normalizedCurrencyCode == selectedCurrency }
     // Build last 6 months spending data
     val monthlyData: List<Pair<String, Long>> = run {
         val calendar = java.util.Calendar.getInstance()
@@ -2068,7 +2147,7 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
             val month = calendar.get(java.util.Calendar.MONTH)
             val year = calendar.get(java.util.Calendar.YEAR)
             val label = java.text.SimpleDateFormat("MMM", java.util.Locale.US).format(calendar.time)
-            val total = receipts.filter {
+            val total = currencyReceipts.filter {
                 val cal = java.util.Calendar.getInstance().also { c -> c.timeInMillis = it.purchasedAtMillis }
                 cal.get(java.util.Calendar.MONTH) == month && cal.get(java.util.Calendar.YEAR) == year
             }.sumOf { it.amountCents }
@@ -2077,7 +2156,7 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
     }
 
     // Category totals
-    val categoryTotals: List<Pair<String, List<Receipt>>> = receipts
+    val categoryTotals: List<Pair<String, List<Receipt>>> = currencyReceipts
         .groupBy { it.normalizedCategory }
         .map { (cat, items) -> cat to items }
         .sortedByDescending { (_, items) -> items.sumOf { it.amountCents } }
@@ -2085,17 +2164,14 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
 
     val categoryColors = listOf(Teal, Coral, Amber, VaultBlue, Color(0xFF7C4DFF))
     val maxMonthly = monthlyData.maxOfOrNull { it.second }?.takeIf { it > 0 } ?: 1L
-    val totalSpent = receipts.sumOf { it.amountCents }
-    val oneCurrency = receipts.map { normalizeCurrencyCode(it.currencyCode) ?: defaultCurrencyCode() }.distinct().singleOrNull()
-    val categorizedCount = receipts.count { it.normalizedCategory != "Uncategorized" }
-    val returnDateCount = receipts.count { it.returnByMillis != null }
-    val warrantyDateCount = receipts.count { it.warrantyUntilMillis != null }
-    val avgAmountLabel = if (receipts.isNotEmpty() && oneCurrency != null) {
-        formatCurrency(totalSpent / receipts.size, oneCurrency)
-    } else if (receipts.isEmpty()) {
-        formatCurrency(0, defaultCurrencyCode())
+    val totalSpent = currencyReceipts.sumOf { it.amountCents }
+    val categorizedCount = currencyReceipts.count { it.normalizedCategory != "Uncategorized" }
+    val returnDateCount = currencyReceipts.count { it.returnByMillis != null }
+    val warrantyDateCount = currencyReceipts.count { it.warrantyUntilMillis != null }
+    val avgAmountLabel = if (currencyReceipts.isNotEmpty()) {
+        formatCurrency(totalSpent / currencyReceipts.size, selectedCurrency)
     } else {
-        "Mixed"
+        formatCurrency(0, selectedCurrency)
     }
 
     LazyColumn(
@@ -2106,9 +2182,9 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
         item {
             // Stats row
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatCard(Modifier.weight(1f), "Total spent", formatReceiptTotal(receipts), Teal)
+                StatCard(Modifier.weight(1f), "Total spent", formatCurrency(totalSpent, selectedCurrency), Teal)
                 StatCard(Modifier.weight(1f), "Avg receipt", avgAmountLabel, Coral)
-                StatCard(Modifier.weight(1f), "Receipts", receipts.size.toString(), Amber)
+                StatCard(Modifier.weight(1f), "Receipts", currencyReceipts.size.toString(), Amber)
             }
         }
         item {
@@ -2210,8 +2286,8 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
         }
         item {
             // Top merchants
-            if (receipts.isNotEmpty()) {
-                val topMerchants = receipts
+            if (currencyReceipts.isNotEmpty()) {
+                val topMerchants = currencyReceipts
                     .groupBy { it.merchant }
                     .map { (merchant, items) -> merchant to items }
                     .sortedByDescending { (_, items) -> items.sumOf { it.amountCents } }
@@ -2234,7 +2310,7 @@ private fun AnalyticsScreen(receipts: List<Receipt>, activePlan: ReceiptVaultPla
         }
         // Issue 5: tax-ready CSV export for Business plan users
         if (activePlan == ReceiptVaultPlan.Business) {
-            item { TaxExportCard(receipts) }
+            item { TaxExportCard(currencyReceipts) }
         }
     }
 }
@@ -2681,9 +2757,25 @@ data class ReceiptVaultAuthUser(
     val displayName: String
 )
 
+private class CurrencyPreferenceStore(context: Context) {
+    private val prefs = context.getSharedPreferences("receiptvault_preferences", Context.MODE_PRIVATE)
+
+    fun load(): String = normalizeCurrencyCode(prefs.getString(CURRENCY_KEY, null)) ?: defaultCurrencyCode()
+
+    fun save(currencyCode: String) {
+        val normalized = normalizeCurrencyCode(currencyCode) ?: defaultCurrencyCode()
+        prefs.edit().putString(CURRENCY_KEY, normalized).apply()
+    }
+
+    private companion object {
+        const val CURRENCY_KEY = "preferred_currency"
+    }
+}
+
 class ReceiptVaultViewModel(application: Application) : AndroidViewModel(application) {
     private val auth = FirebaseAuth.getInstance()
     private val store = ReceiptStore(application)
+    private val currencyStore = CurrencyPreferenceStore(application)
     private val connectorStore = EmailConnectorStore(application)
     private val connectorClient = EmailConnectorClient()
     private val playBillingClient = PlayBillingClient(application)
@@ -2708,6 +2800,9 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     // B12: initialise with empty lists; load from SharedPreferences on the IO thread in init
     private val _receipts = MutableStateFlow<List<Receipt>>(emptyList())
     val receipts: StateFlow<List<Receipt>> = _receipts
+
+    private val _preferredCurrency = MutableStateFlow(currencyStore.load())
+    val preferredCurrency: StateFlow<String> = _preferredCurrency
 
     private val _emailAccounts = MutableStateFlow<List<EmailConnectorAccount>>(emptyList())
     val emailAccounts: StateFlow<List<EmailConnectorAccount>> = _emailAccounts
@@ -2826,6 +2921,13 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         _authMessage.value = message
     }
 
+    fun setPreferredCurrency(currencyCode: String) {
+        val normalized = normalizeCurrencyCode(currencyCode) ?: return
+        currencyStore.save(normalized)
+        _preferredCurrency.value = normalized
+        _message.value = "Default currency set to $normalized."
+    }
+
     fun clearAuthMessage() {
         _authMessage.value = ""
     }
@@ -2884,8 +2986,13 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 ocrResult.text
             }
             orientedBitmap.recycle()  // free memory after OCR
-            val localDraft = parser.parse(rawText)
-            val draft = parser.mergeWithAi(localDraft, aiClient.categorize(rawText, source))
+            val defaultCurrency = _preferredCurrency.value
+            val localDraft = parser.parse(rawText, defaultCurrency)
+            val draft = parser.mergeWithAi(
+                localDraft,
+                aiClient.categorize(rawText, source, defaultCurrency),
+                defaultCurrency
+            )
             val receipt = Receipt(
                 id = id,
                 merchant = draft.merchant,
@@ -3017,7 +3124,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         }
         if (!connectorStore.canAddAccount()) {
             val plan = connectorStore.currentPlan()
-            _message.value = "${plan.label} allows ${plan.maxEmailAccounts} connected email account."
+            _message.value = "${plan.label} allows ${plan.maxEmailAccounts} connected email connector."
             return
         }
         _isBusy.value = true
@@ -3057,7 +3164,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         }
         if (!connectorStore.canAddAccount()) {
             val plan = connectorStore.currentPlan()
-            _message.value = "${plan.label} allows ${plan.maxEmailAccounts} connected email account."
+            _message.value = "${plan.label} allows ${plan.maxEmailAccounts} connected email connector."
             return
         }
 
@@ -3113,7 +3220,10 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 var importedNow = 0
                 for (receiptJson in summary.receipts) {
                     runCatching {
-                        val receipt = Receipt.fromJson(receiptJson)
+                        val jsonCurrency = normalizeCurrencyCode(receiptJson.optString("currencyCode", ""))
+                        val receipt = Receipt.fromJson(receiptJson).let { imported ->
+                            if (jsonCurrency == null) imported.copy(currencyCode = _preferredCurrency.value) else imported
+                        }
                         val emailKey = receipt.emailMessageId ?: receipt.id
                         if (!store.isEmailImported(emailKey)) {
                             _receipts.value = store.upsert(receipt)
@@ -3601,7 +3711,7 @@ private class ReceiptParser {
         DateTimeFormatter.ofPattern("MMMM d yyyy", Locale.US)
     )
 
-    fun parse(rawText: String): ReceiptDraft {
+    fun parse(rawText: String, defaultCurrency: String = defaultCurrencyCode()): ReceiptDraft {
         val lines = rawText.lines()
             .map { it.trim() }
             .filter { it.isNotBlank() }
@@ -3615,7 +3725,7 @@ private class ReceiptParser {
         } ?: "Unknown store"
 
         val amount = parseAmount(lines)
-        val currencyCode = inferCurrencyCode(rawText)
+        val currencyCode = inferCurrencyCode(rawText, defaultCurrency)
         val purchasedAt = parseDate(lines) ?: LocalDate.now()
         val category = inferCategory(rawText, merchant)
         // Issue 3: do NOT auto-set returnByMillis — only set it via explicit user input or AI signal
@@ -3632,7 +3742,11 @@ private class ReceiptParser {
         )
     }
 
-    fun mergeWithAi(local: ReceiptDraft, ai: ReceiptAiSuggestion?): ReceiptDraft {
+    fun mergeWithAi(
+        local: ReceiptDraft,
+        ai: ReceiptAiSuggestion?,
+        defaultCurrency: String = defaultCurrencyCode()
+    ): ReceiptDraft {
         if (ai == null || !ai.isReceipt || ai.confidence < 0.55) return local
 
         val purchasedAt = ai.purchaseDate
@@ -3646,7 +3760,7 @@ private class ReceiptParser {
             ?.let { (it * 100).roundToLong() }
             ?: local.amountCents
 
-        val currencyCode = normalizeCurrencyCode(ai.currencyCode) ?: local.currencyCode
+        val currencyCode = normalizeCurrencyCode(ai.currencyCode) ?: local.currencyCode.ifBlank { defaultCurrency }
 
         // Issue 3: only set returnBy when the AI explicitly signals a return window
         val returnBy = ai.returnWindowDays
@@ -3734,13 +3848,15 @@ private class ReceiptParser {
         }
     }
 
-    private fun inferCurrencyCode(rawText: String): String {
+    private fun inferCurrencyCode(rawText: String, fallbackCurrencyCode: String): String {
         val upper = rawText.uppercase(Locale.US)
         listOf("USD", "CAD", "AUD", "EUR", "GBP", "INR", "PKR", "AED", "SAR", "JPY", "CNY", "KRW", "TRY", "BRL", "MXN")
             .firstOrNull { Regex("""\b$it\b""").containsMatchIn(upper) }
             ?.let { return it }
 
+        val fallback = normalizeCurrencyCode(fallbackCurrencyCode) ?: defaultCurrencyCode()
         return when {
+            Regex("""(?i)\bRS\.?\b|\bRUPEES?\b""").containsMatchIn(rawText) -> "PKR"
             rawText.contains("€") -> "EUR"
             rawText.contains("£") -> "GBP"
             rawText.contains("₹") -> "INR"
@@ -3755,8 +3871,8 @@ private class ReceiptParser {
             rawText.contains("₪") -> "ILS"
             rawText.contains("₱") -> "PHP"
             rawText.contains("R$") -> "BRL"
-            rawText.contains("$") -> defaultCurrencyCode()
-            else -> defaultCurrencyCode()
+            rawText.contains("$") -> fallback
+            else -> fallback
         }
     }
 
@@ -3886,6 +4002,7 @@ data class Receipt(
     val normalizedDocumentType: String get() = normalizeDocumentType(documentType)
     val documentTypeLabel: String get() = normalizedDocumentType.toDocumentTypeLabel()
     val normalizedCategory: String get() = normalizeReceiptCategory(category)
+    val normalizedCurrencyCode: String get() = normalizeCurrencyCode(currencyCode) ?: defaultCurrencyCode()
     val returnByIso: String? get() = returnByMillis?.formatIsoDate()
     val warrantyUntilIso: String? get() = warrantyUntilMillis?.formatIsoDate()
     val returnByLabel: String get() = returnByMillis?.formatDate() ?: "Not set"
@@ -4104,7 +4221,16 @@ private fun Long.toIsoDateFromDatePicker(): String =
 
 private fun todayMillis(): Long = LocalDate.now().toMillis()
 
-private fun formatReceiptTotal(receipts: List<Receipt>): String {
+private fun formatReceiptTotal(receipts: List<Receipt>, currencyCode: String? = null): String {
+    val selectedCurrency = normalizeCurrencyCode(currencyCode)
+    if (selectedCurrency != null) {
+        return formatCurrency(
+            receipts
+                .filter { it.normalizedCurrencyCode == selectedCurrency }
+                .sumOf { it.amountCents },
+            selectedCurrency
+        )
+    }
     if (receipts.isEmpty()) return formatCurrency(0, defaultCurrencyCode())
     val totals = receipts.groupBy { normalizeCurrencyCode(it.currencyCode) ?: defaultCurrencyCode() }
         .mapValues { (_, values) -> values.sumOf { it.amountCents } }
@@ -4169,6 +4295,25 @@ private fun normalizeCurrencyCode(value: String?): String? {
     if (normalized.length != 3) return null
     return runCatching { Currency.getInstance(normalized).currencyCode }.getOrNull()
 }
+
+private fun supportedCurrencyCodes(): List<String> = listOf(
+    "USD",
+    "PKR",
+    "CAD",
+    "GBP",
+    "EUR",
+    "AUD",
+    "AED",
+    "SAR",
+    "INR",
+    "JPY",
+    "CNY",
+    "SGD",
+    "MYR",
+    "TRY",
+    "BRL",
+    "MXN"
+)
 
 private val StandardReceiptCategories = listOf(
     "Groceries",

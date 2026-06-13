@@ -4,12 +4,12 @@
 
 Price: $0
 
-- 50 stored receipts.
-- 5 warranty items.
+- Unlimited manual camera, gallery, file, and share-sheet uploads.
+- Local receipt and warranty storage.
 - Camera scan.
 - Image upload.
 - Email image import through Android Share.
-- 1 connected email account after OAuth connectors launch.
+- 1 connected email connector after OAuth connectors launch.
 - 10 automatic receipt/order email imports per month.
 - Basic OCR.
 - Basic Gemini 2.5 Flash-Lite categorization.
@@ -20,11 +20,11 @@ Price: $0
 
 Price: $4.99/month or $47.99/year
 
-- 1,000 stored receipts.
 - Optional Cloudflare R2 cloud backup.
 - Restore backed-up receipts on a new device.
-- Up to 3 connected email accounts.
-- 250 automatic receipt/order email imports per month.
+- Up to 3 connected email connectors.
+- Automatic receipt/order email imports.
+- Unlimited manual camera, gallery, file, and share-sheet uploads.
 - Unlimited warranty tracking.
 - Return and warranty reminders.
 - Advanced search.
@@ -36,9 +36,9 @@ Price: $4.99/month or $47.99/year
 
 Price: $12.99/month or $124.99/year
 
-- 5,000 stored receipts.
-- Up to 10 connected email accounts.
-- 1,000 automatic receipt/order email imports per month.
+- Up to 10 connected email connectors.
+- Automatic receipt/order email imports.
+- Unlimited manual camera, gallery, file, and share-sheet uploads.
 - Business folders.
 - Tax/export reports.
 - Team-ready export package.

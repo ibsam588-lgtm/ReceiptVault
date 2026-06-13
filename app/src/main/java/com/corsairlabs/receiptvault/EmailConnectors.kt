@@ -164,7 +164,7 @@ class EmailConnectorStore(private val context: Context) {
         if (!canAddAccount()) {
             return ConnectorStoreResult(
                 accounts,
-                "${plan.label} allows ${plan.maxEmailAccounts} connected email account."
+                "${plan.label} allows ${plan.maxEmailAccounts} connected email connector."
             )
         }
 

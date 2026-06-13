@@ -36,16 +36,14 @@ Core promise:
 
 ## Revenue Model
 
-- Free: $0, local-first storage, 50 stored receipts, 5 warranty items,
-  manual camera/image/share imports, 10 automatic email receipt imports per month,
-  basic OCR, basic categories, and ads.
-- Plus: $4.99/month or $47.99/year, 1,000 receipts, Cloudflare R2 backup,
-  up to 3 connected email accounts, 250 automatic email receipt imports per month,
-  no ads, unlimited warranties, reminders, advanced search, CSV/PDF export, and
-  Gemini categorization.
-- Business: $12.99/month or $124.99/year, higher receipt and email import limits,
-  no ads, up to 10 connected email accounts, business folders, tax/export
-  reports, and priority support.
+- Free: $0, local-first storage, unlimited manual camera/image/share uploads,
+  10 automatic email document imports per month, basic OCR, basic categories,
+  and ads.
+- Plus: $4.99/month or $47.99/year, Cloudflare R2 backup, up to 3 connected
+  email connectors, no ads, unlimited manual uploads, unlimited warranties,
+  reminders, advanced search, CSV/PDF export, and Gemini categorization.
+- Business: $12.99/month or $124.99/year, no ads, up to 10 connected email
+  connectors, business folders, tax/export reports, and priority support.
 
 ## Android Stack
 
@@ -58,9 +56,10 @@ Core promise:
 - Billing: Google Play Billing Library with subscription product IDs for Plus
   and Business, plus Worker-side Google Play token verification when the service
   account secret is configured.
-- Ads: Google Mobile Ads SDK. Free users see banner ads plus a rewarded
-  interstitial video break every second app visit, with regular interstitial as
-  fallback; Plus and Business users do not see ads.
+- Ads: Google Mobile Ads SDK. Free users see banner ads plus a full-screen
+  interstitial ad break every second app visit; Plus and Business users do not
+  see ads. The app does not show its own skip prompt, but AdMob controls the
+  close/skip UI inside served ads.
 - Cloud backup: Cloudflare Worker plus R2, gated by Firebase Auth and paid plan claims.
 
 ## Built Features
@@ -97,9 +96,8 @@ Core promise:
   not present, the app falls back to the Firebase-generated
   `default_web_client_id` resource.
 - Ads: release builds read `ADMOB_APP_ID`, `ADMOB_BANNER_AD_UNIT_ID`, and
-  `ADMOB_INTERSTITIAL_AD_UNIT_ID`, and
-  `ADMOB_REWARDED_INTERSTITIAL_AD_UNIT_ID` from GitHub Actions secrets. Local
-  builds use Google's test ad IDs until real AdMob units are configured.
+  `ADMOB_INTERSTITIAL_AD_UNIT_ID` from GitHub Actions secrets. Local builds use
+  Google's test ad IDs until real AdMob units are configured.
 
 Google SSO launch requirements:
 
@@ -174,9 +172,9 @@ Gemini project status:
 
 Automatic Gmail and Outlook imports scan receipt/order/bill/invoice/warranty
 candidates, import matching message text and eligible attachments, and dedupe by
-provider message ID so repeated syncs do not recreate old receipts. Free users
-are capped at 10 automatic email imports per month; Plus is capped at 250 and
-Business at 1000.
+provider message ID so repeated syncs do not recreate old receipts. Manual
+camera/gallery/share uploads are not capped. Automatic mailbox imports remain
+plan-gated server-side, starting with 10 imports per month on Free.
 
 Google Play Billing product IDs:
 

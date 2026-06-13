@@ -22,6 +22,7 @@ type CategorizeRequest = {
   emailSubject?: string;
   emailFrom?: string;
   emailDate?: string;
+  preferredCurrency?: string;
 };
 
 type ConnectorCandidateRequest = {
@@ -2231,12 +2232,22 @@ async function readCategorizeBody(request: Request): Promise<CategorizeRequest> 
   }
 }
 
+function normalizeCurrencyCode(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toUpperCase();
+  const allowed = new Set(["USD", "CAD", "AUD", "EUR", "GBP", "INR", "PKR", "AED", "SAR", "JPY", "CNY", "KRW", "TRY", "BRL", "MXN"]);
+  return allowed.has(normalized) ? normalized : null;
+}
+
 function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): string {
+  const preferredCurrency = normalizeCurrencyCode(body.preferredCurrency) || "USD";
   return [
     "You classify purchase documents for ReceiptVault.",
     "Use only the provided document text and optional email headers.",
     "Classify receipts, order confirmations, invoices, bills, utility bills, statements, returns, subscriptions, and warranty/protection records.",
     "If the text is not one of those records, set isReceipt to false and confidence to 0.3 or lower.",
+    `Use ${preferredCurrency} as the fallback currency when the text has an amount but no clear ISO currency code or unambiguous currency symbol.`,
+    "If the text explicitly contains another ISO currency code, Rs/rupees, AED, SAR, EUR/GBP/INR/JPY symbols, or another clear currency marker, use that currency instead.",
     "Set warrantyCandidate true only when the text explicitly says warranty, guarantee, protection plan, or coverage for a product or service.",
     "Do not infer warranty from category, card/bank receipts, or standard return/exchange wording.",
     "Do not include unrelated email content. Return only JSON.",

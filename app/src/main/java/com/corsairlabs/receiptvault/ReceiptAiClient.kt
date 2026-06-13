@@ -18,11 +18,11 @@ class ReceiptAiClient(context: Context) {
     private val auth = FirebaseAuth.getInstance()
     private val endpoint = "${BuildConfig.R2_BACKUP_API_URL}/v1/ai/categorize"
 
-    suspend fun categorize(rawText: String, source: ImportSource): ReceiptAiSuggestion? {
+    suspend fun categorize(rawText: String, source: ImportSource, preferredCurrency: String): ReceiptAiSuggestion? {
         if (rawText.isBlank()) return null
         return runCatching {
             val token = firebaseToken()
-            postCategorize(token, rawText, source)
+            postCategorize(token, rawText, source, preferredCurrency)
         }.getOrNull()
     }
 
@@ -35,7 +35,12 @@ class ReceiptAiClient(context: Context) {
         return token ?: throw IOException("Firebase token unavailable")
     }
 
-    private suspend fun postCategorize(token: String, rawText: String, source: ImportSource): ReceiptAiSuggestion? =
+    private suspend fun postCategorize(
+        token: String,
+        rawText: String,
+        source: ImportSource,
+        preferredCurrency: String
+    ): ReceiptAiSuggestion? =
         withContext(Dispatchers.IO) {
             val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -49,6 +54,7 @@ class ReceiptAiClient(context: Context) {
             val body = JSONObject()
                 .put("ocrText", rawText.take(12000))
                 .put("emailSubject", if (source == ImportSource.EmailShare) "Shared email receipt" else "")
+                .put("preferredCurrency", preferredCurrency)
                 .toString()
 
             connection.outputStream.use { output ->

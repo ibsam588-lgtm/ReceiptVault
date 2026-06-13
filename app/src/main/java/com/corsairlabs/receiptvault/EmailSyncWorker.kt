@@ -5,7 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 
 /**
- * Periodic background sync of connected email accounts for paid users.
+ * Periodic background sync of connected email connectors for paid users.
  *
  * Uses the same [EmailConnectorClient] / [EmailConnectorStore] / [ReceiptStore] logic as the
  * manual "Sync" action in the app, so receipts imported in the background show up the next time
