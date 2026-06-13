@@ -94,6 +94,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -122,8 +123,11 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -405,6 +409,7 @@ private fun ReceiptVaultApp(
     val message by viewModel.message.collectAsState()
     val pendingExternalUrl by viewModel.pendingExternalUrl.collectAsState()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val showFreeAds = activePlan == ReceiptVaultPlan.Free && !billingState.loading
     val adController = remember(context) {
         context.findActivity()?.let { ReceiptVaultAdController(it) }
@@ -413,9 +418,20 @@ private fun ReceiptVaultApp(
     LaunchedEffect(showFreeAds, adController) {
         if (showFreeAds) {
             adController?.startForFreeUser()
+            adController?.recordFreeVisit()
         } else {
             adController?.stopForPaidUser()
         }
+    }
+
+    DisposableEffect(showFreeAds, adController, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START && showFreeAds) {
+                adController?.recordFreeVisit()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // B5: wrap in try/catch — ActivityNotFoundException if no browser is installed

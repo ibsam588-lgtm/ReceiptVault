@@ -58,8 +58,9 @@ Core promise:
 - Billing: Google Play Billing Library with subscription product IDs for Plus
   and Business, plus Worker-side Google Play token verification when the service
   account secret is configured.
-- Ads: Google Mobile Ads SDK. Free users see banner ads plus an interstitial
-  launch ad every second app visit; Plus and Business users do not see ads.
+- Ads: Google Mobile Ads SDK. Free users see banner ads plus a rewarded
+  interstitial video break every second app visit, with regular interstitial as
+  fallback; Plus and Business users do not see ads.
 - Cloud backup: Cloudflare Worker plus R2, gated by Firebase Auth and paid plan claims.
 
 ## Built Features
@@ -96,8 +97,9 @@ Core promise:
   not present, the app falls back to the Firebase-generated
   `default_web_client_id` resource.
 - Ads: release builds read `ADMOB_APP_ID`, `ADMOB_BANNER_AD_UNIT_ID`, and
-  `ADMOB_INTERSTITIAL_AD_UNIT_ID` from GitHub Actions secrets. Local builds use
-  Google's test ad IDs until real AdMob units are configured.
+  `ADMOB_INTERSTITIAL_AD_UNIT_ID`, and
+  `ADMOB_REWARDED_INTERSTITIAL_AD_UNIT_ID` from GitHub Actions secrets. Local
+  builds use Google's test ad IDs until real AdMob units are configured.
 
 Google SSO launch requirements:
 
