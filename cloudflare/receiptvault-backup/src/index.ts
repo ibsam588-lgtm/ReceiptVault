@@ -2235,8 +2235,13 @@ async function readCategorizeBody(request: Request): Promise<CategorizeRequest> 
 function normalizeCurrencyCode(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.trim().toUpperCase();
-  const allowed = new Set(["USD", "CAD", "AUD", "EUR", "GBP", "INR", "PKR", "AED", "SAR", "JPY", "CNY", "KRW", "TRY", "BRL", "MXN"]);
-  return allowed.has(normalized) ? normalized : null;
+  if (!/^[A-Z]{3}$/.test(normalized)) return null;
+  try {
+    new Intl.NumberFormat("en", { style: "currency", currency: normalized }).format(1);
+    return normalized;
+  } catch {
+    return null;
+  }
 }
 
 function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): string {
@@ -2246,8 +2251,8 @@ function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): st
     "Use only the provided document text and optional email headers.",
     "Classify receipts, order confirmations, invoices, bills, utility bills, statements, returns, subscriptions, and warranty/protection records.",
     "If the text is not one of those records, set isReceipt to false and confidence to 0.3 or lower.",
-    `Use ${preferredCurrency} as the fallback currency when the text has an amount but no clear ISO currency code or unambiguous currency symbol.`,
-    "If the text explicitly contains another ISO currency code, Rs/rupees, AED, SAR, EUR/GBP/INR/JPY symbols, or another clear currency marker, use that currency instead.",
+    `Use ${preferredCurrency} as the fallback currency when the text has an amount but no clear ISO 4217 currency code or unambiguous currency symbol.`,
+    "If the text explicitly contains another ISO 4217 code, currency symbol, or clear currency marker, use that currency instead.",
     "Set warrantyCandidate true only when the text explicitly says warranty, guarantee, protection plan, or coverage for a product or service.",
     "Do not infer warranty from category, card/bank receipts, or standard return/exchange wording.",
     "Do not include unrelated email content. Return only JSON.",
@@ -2257,7 +2262,7 @@ function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): st
     '  "isReceipt": boolean,',
     '  "merchant": string,',
     '  "total": number | null,',
-    '  "currencyCode": "USD" | "CAD" | "AUD" | "EUR" | "GBP" | "INR" | "PKR" | "AED" | "SAR" | "JPY" | "CNY" | "KRW" | "TRY" | "BRL" | "MXN" | null,',
+    '  "currencyCode": "ISO 4217 3-letter currency code" | null,',
     '  "purchaseDate": "YYYY-MM-DD" | null,',
     '  "documentType": "receipt" | "order" | "invoice" | "bill" | "statement" | "warranty" | "return" | "subscription" | "other",',
     '  "category": "Groceries" | "Electronics" | "Home" | "Business" | "Shopping" | "Food" | "Travel" | "Health" | "Auto" | "Other" | "Uncategorized",',

@@ -67,6 +67,8 @@ Core promise:
 - Native Android app under package `com.corsairlabs.receiptvault`.
 - Camera receipt capture using Android's camera contract.
 - Gallery/file image upload.
+- Home currency selector supports the full ISO 4217 currency list and feeds the
+  selected default into OCR, upload, email-share, and Gemini categorization.
 - Email attachment import through the Android share sheet for `image/*`.
 - On-device OCR text extraction through ML Kit.
 - Firebase-authenticated Gemini 2.5 Flash-Lite categorization after OCR, with

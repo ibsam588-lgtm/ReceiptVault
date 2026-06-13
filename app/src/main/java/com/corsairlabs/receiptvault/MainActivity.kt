@@ -897,7 +897,13 @@ private fun CurrencySelector(
         ) {
             supportedCurrencyCodes().forEach { code ->
                 DropdownMenuItem(
-                    text = { Text(code) },
+                    text = {
+                        Text(
+                            "$code - ${currencyDisplayName(code)}",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     onClick = {
                         expanded = false
                         onCurrencyChange(code)
@@ -3850,7 +3856,7 @@ private class ReceiptParser {
 
     private fun inferCurrencyCode(rawText: String, fallbackCurrencyCode: String): String {
         val upper = rawText.uppercase(Locale.US)
-        listOf("USD", "CAD", "AUD", "EUR", "GBP", "INR", "PKR", "AED", "SAR", "JPY", "CNY", "KRW", "TRY", "BRL", "MXN")
+        supportedCurrencyCodes()
             .firstOrNull { Regex("""\b$it\b""").containsMatchIn(upper) }
             ?.let { return it }
 
@@ -4296,24 +4302,15 @@ private fun normalizeCurrencyCode(value: String?): String? {
     return runCatching { Currency.getInstance(normalized).currencyCode }.getOrNull()
 }
 
-private fun supportedCurrencyCodes(): List<String> = listOf(
-    "USD",
-    "PKR",
-    "CAD",
-    "GBP",
-    "EUR",
-    "AUD",
-    "AED",
-    "SAR",
-    "INR",
-    "JPY",
-    "CNY",
-    "SGD",
-    "MYR",
-    "TRY",
-    "BRL",
-    "MXN"
-)
+private fun supportedCurrencyCodes(): List<String> =
+    Currency.getAvailableCurrencies()
+        .map { it.currencyCode }
+        .distinct()
+        .sorted()
+
+private fun currencyDisplayName(currencyCode: String): String =
+    runCatching { Currency.getInstance(currencyCode).getDisplayName(Locale.getDefault()) }
+        .getOrDefault(currencyCode)
 
 private val StandardReceiptCategories = listOf(
     "Groceries",
