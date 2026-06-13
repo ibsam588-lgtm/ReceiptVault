@@ -103,6 +103,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -517,6 +518,7 @@ private fun ReceiptVaultApp(
                             viewModel.updateReceiptText(id, text)
                         }
                     },
+                    onOpenAttachment = viewModel::openEmailAttachment,
                     onSave = viewModel::updateReceipt
                 )
             }
@@ -1142,7 +1144,7 @@ private fun EmailConnectorsScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        "Only receipt, order, invoice, return, and warranty messages are eligible for import.",
+                        "Only receipt, order, invoice, bill, statement, return, and warranty messages are eligible for import.",
                         color = Color.White.copy(alpha = 0.78f),
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -1164,7 +1166,7 @@ private fun EmailConnectorsScreen(
         items(EmailProvider.entries.filter { it != EmailProvider.Imap }, key = { it.name }) { provider ->
             ProviderConnectCard(
                 provider = provider,
-                enabled = mailboxConsent,
+                enabled = mailboxConsent && provider.liveSyncAvailable,
                 onConnect = { onConnect(provider) }
             )
         }
@@ -1186,7 +1188,7 @@ private fun EmailConnectorsScreen(
                 onConnect = {
                     onConnectImap(imapEmail, imapHost, imapPort, imapUsername, imapPassword, imapUseTls)
                 },
-                enabled = mailboxConsent
+                enabled = mailboxConsent && EmailProvider.Imap.liveSyncAvailable
             )
         }
 
@@ -1232,12 +1234,12 @@ private fun MailboxConsentCard(checked: Boolean, onCheckedChange: (Boolean) -> U
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Mailbox access consent", fontWeight = FontWeight.ExtraBold)
                 Text(
-                    "ReceiptVault searches connected mailboxes only for receipts, orders, invoices, returns, and warranty records. Non-receipt messages are discarded and never stored.",
+                    "ReceiptVault searches connected mailboxes only for receipts, orders, invoices, bills, statements, returns, and warranty records. Non-matching messages are discarded and never stored.",
                     color = Muted,
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(
-                    "Extracted receipt text may be sent to an AI service to identify the merchant, amount, and category. No email body content is stored or transmitted.",
+                    "Eligible document text and attachments are saved to the receipt. Extracted text may be sent to an AI service to identify the merchant, amount, and category.",
                     color = Muted,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1253,17 +1255,30 @@ private fun MailboxConsentCard(checked: Boolean, onCheckedChange: (Boolean) -> U
 
 @Composable
 private fun ProviderConnectCard(provider: EmailProvider, enabled: Boolean, onConnect: () -> Unit) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val disabledMessage = when {
+        !provider.liveSyncAvailable -> provider.unavailableMessage
+        !enabled -> "Accept mailbox access consent to connect."
+        else -> ""
+    }
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(if (enabled) Color.White else Color(0xFFEFF3F4))
+    ) {
+        Column(
+            Modifier
+                .padding(16.dp)
+                .alpha(if (enabled) 1f else 0.62f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFEAF8F6)),
+                        .background(if (enabled) Color(0xFFEAF8F6) else Color(0xFFE1E7E9)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
+                    Icon(Icons.Default.Email, contentDescription = null, tint = if (enabled) TealDark else Muted)
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -1272,6 +1287,9 @@ private fun ProviderConnectCard(provider: EmailProvider, enabled: Boolean, onCon
                 }
             }
             Text("Search: ${provider.receiptQuery}", color = Muted, style = MaterialTheme.typography.bodySmall)
+            if (disabledMessage.isNotBlank()) {
+                Text(disabledMessage, color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
             Button(
                 onClick = onConnect,
                 enabled = enabled,
@@ -1302,17 +1320,30 @@ private fun ManualImapConnectCard(
     onConnect: () -> Unit,
     enabled: Boolean
 ) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val disabledMessage = when {
+        !EmailProvider.Imap.liveSyncAvailable -> EmailProvider.Imap.unavailableMessage
+        !enabled -> "Accept mailbox access consent to save IMAP settings."
+        else -> ""
+    }
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(if (enabled) Color.White else Color(0xFFEFF3F4))
+    ) {
+        Column(
+            Modifier
+                .padding(16.dp)
+                .alpha(if (enabled) 1f else 0.62f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFEAF8F6)),
+                        .background(if (enabled) Color(0xFFEAF8F6) else Color(0xFFE1E7E9)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
+                    Icon(Icons.Default.Email, contentDescription = null, tint = if (enabled) TealDark else Muted)
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
@@ -1321,7 +1352,7 @@ private fun ManualImapConnectCard(
                 }
             }
             Text(
-                "Use an app password when your provider supports one.",
+                disabledMessage.ifBlank { "Use an app password when your provider supports one." },
                 color = Muted,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -1330,7 +1361,8 @@ private fun ManualImapConnectCard(
                 onValueChange = onEmailChange,
                 label = { Text("Email address") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                enabled = enabled
             )
             OutlinedTextField(
                 value = host,
@@ -1338,7 +1370,8 @@ private fun ManualImapConnectCard(
                 label = { Text("IMAP host") },
                 placeholder = { Text("imap.example.com") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                enabled = enabled
             )
             OutlinedTextField(
                 value = port,
@@ -1346,14 +1379,16 @@ private fun ManualImapConnectCard(
                 label = { Text("Port") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                enabled = enabled
             )
             OutlinedTextField(
                 value = username,
                 onValueChange = onUsernameChange,
                 label = { Text("Username") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+                enabled = enabled
             )
             OutlinedTextField(
                 value = password,
@@ -1361,7 +1396,8 @@ private fun ManualImapConnectCard(
                 label = { Text("App password") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                visualTransformation = PasswordVisualTransformation()
+                visualTransformation = PasswordVisualTransformation(),
+                enabled = enabled
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1369,7 +1405,7 @@ private fun ManualImapConnectCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Use TLS", fontWeight = FontWeight.Bold)
-                Switch(checked = useTls, onCheckedChange = onUseTlsChange)
+                Switch(checked = useTls, onCheckedChange = onUseTlsChange, enabled = enabled)
             }
             Button(
                 onClick = onConnect,
@@ -1391,7 +1427,13 @@ private fun EmailAccountCard(
     onDisconnect: () -> Unit,
     onDeleteData: () -> Unit
 ) {
-    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+    val canSync = account.provider.liveSyncAvailable &&
+        account.status != ConnectorStatus.Disconnected &&
+        account.status != ConnectorStatus.OAuthPending
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(if (account.provider.liveSyncAvailable) Color.White else Color(0xFFEFF3F4))
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 MerchantMark(account.provider.label)
@@ -1407,6 +1449,9 @@ private fun EmailAccountCard(
                     fontWeight = FontWeight.Bold
                 )
             }
+            if (!account.provider.liveSyncAvailable) {
+                Text(account.provider.unavailableMessage, color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
             Text(
                 "${account.monthlyImportCount}/${account.monthlyImportLimit} imports used this month",
                 color = Muted,
@@ -1419,7 +1464,12 @@ private fun EmailAccountCard(
                 style = MaterialTheme.typography.labelSmall
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onSync, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
+                OutlinedButton(
+                    onClick = onSync,
+                    enabled = canSync,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
                     Text("Sync")
                 }
                 OutlinedButton(onClick = onDisconnect, modifier = Modifier.weight(1f), shape = RoundedCornerShape(8.dp)) {
@@ -1553,6 +1603,7 @@ private fun ReceiptDetailScreen(
     onBack: () -> Unit,
     onDelete: () -> Unit,
     onUpdateText: (String) -> Unit = {},
+    onOpenAttachment: (ReceiptEmailAttachment) -> Unit = {},
     onSave: (Receipt) -> Unit = {}
 ) {
     if (receipt == null) {
@@ -1565,7 +1616,6 @@ private fun ReceiptDetailScreen(
         return
     }
 
-    val context = LocalContext.current
     var editingDetails by remember(receipt.id) { mutableStateOf(false) }
     var editState by remember(receipt.id) { mutableStateOf(ReceiptEditState.from(receipt)) }
     var editError by remember(receipt.id) { mutableStateOf("") }
@@ -1584,12 +1634,7 @@ private fun ReceiptDetailScreen(
                     Text(formatCurrency(receipt.amountCents, receipt.currencyCode), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
                 }
                 AssistChip(
-                    onClick = {
-                        val url = receipt.emailUrl
-                        if (receipt.source == ImportSource.EmailShare && !url.isNullOrBlank()) {
-                            openEmailUrl(context, url)
-                        }
-                    },
+                    onClick = {},
                     label = { Text(receipt.documentTypeLabel) }
                 )
                 Spacer(Modifier.width(8.dp))
@@ -1637,49 +1682,9 @@ private fun ReceiptDetailScreen(
         item {
             ReceiptImage(receipt.imagePath)
         }
-        item {
-            val emailUrl = receipt.emailUrl
-            if (!emailUrl.isNullOrBlank()) {
-                // X8: determine label from URL rather than hardcoding "Gmail"
-                val emailAppLabel = when {
-                    emailUrl.contains("mail.google.com") -> "Opens in Gmail"
-                    emailUrl.contains("outlook") || emailUrl.contains("live.com") -> "Opens in Outlook"
-                    emailUrl.contains("yahoo.com") -> "Opens in Yahoo Mail"
-                    else -> "Opens in email app"
-                }
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            openEmailUrl(context, emailUrl)
-                        },
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
-                        Column(Modifier.weight(1f)) {
-                            Text("View original email", fontWeight = FontWeight.Bold)
-                            Text(emailAppLabel, color = Muted, style = MaterialTheme.typography.bodySmall)
-                            receipt.emailFrom?.let {
-                                Text("From: $it", color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                            receipt.emailSubject?.let {
-                                Text(it, color = Ink, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            }
-                        }
-                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Muted)
-                    }
-                }
-            }
-        }
         if (receipt.emailAttachments.isNotEmpty()) {
             item {
-                EmailAttachmentsCard(receipt.emailAttachments)
+                EmailAttachmentsCard(receipt.emailAttachments, onOpenAttachment)
             }
         }
         item {
@@ -1887,16 +1892,37 @@ private fun DateInputField(
 }
 
 @Composable
-private fun EmailAttachmentsCard(attachments: List<ReceiptEmailAttachment>) {
+private fun EmailAttachmentsCard(
+    attachments: List<ReceiptEmailAttachment>,
+    onOpenAttachment: (ReceiptEmailAttachment) -> Unit
+) {
     Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Email attachments", fontWeight = FontWeight.ExtraBold)
             attachments.forEach { attachment ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
+                val canOpen = attachment.canOpen
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = canOpen) { onOpenAttachment(attachment) }
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Email,
+                        contentDescription = null,
+                        tint = if (canOpen) TealDark else Muted
+                    )
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(attachment.filename, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            attachment.filename,
+                            fontWeight = FontWeight.Bold,
+                            color = if (canOpen) Ink else Muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         Text(
                             "${attachment.mimeType} - ${formatFileSize(attachment.size)}",
                             color = Muted,
@@ -1905,7 +1931,16 @@ private fun EmailAttachmentsCard(attachments: List<ReceiptEmailAttachment>) {
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Text(attachment.statusLabel, color = Muted, style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        if (canOpen) "Open" else attachment.statusLabel,
+                        color = if (canOpen) TealDark else Muted,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (canOpen) FontWeight.Bold else FontWeight.Normal
+                    )
+                    if (canOpen) {
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = TealDark)
+                    }
                 }
             }
         }
@@ -2923,6 +2958,10 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun connectEmailProvider(provider: EmailProvider) {
+        if (!provider.liveSyncAvailable) {
+            _message.value = provider.unavailableMessage
+            return
+        }
         if (!connectorStore.canAddAccount()) {
             val plan = connectorStore.currentPlan()
             _message.value = "${plan.label} allows ${plan.maxEmailAccounts} connected email account."
@@ -2959,6 +2998,10 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
         password: String,
         useTls: Boolean
     ) {
+        if (!EmailProvider.Imap.liveSyncAvailable) {
+            _message.value = EmailProvider.Imap.unavailableMessage
+            return
+        }
         if (!connectorStore.canAddAccount()) {
             val plan = connectorStore.currentPlan()
             _message.value = "${plan.label} allows ${plan.maxEmailAccounts} connected email account."
@@ -2988,7 +3031,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                         provider = EmailProvider.Imap,
                         emailAddress = config.emailAddress,
                         status = ConnectorStatus.Ready,
-                    lastMessage = "IMAP settings saved encrypted. Purchase-document imports will use this mailbox configuration."
+                        lastMessage = "IMAP settings saved encrypted. Purchase-document imports will use this mailbox configuration."
                     )
                     _emailAccounts.value = result.accounts
                     _message.value = "IMAP connector saved."
@@ -3003,6 +3046,10 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
 
     fun syncEmailAccount(id: String) {
         val account = _emailAccounts.value.firstOrNull { it.id == id } ?: return
+        if (!account.provider.liveSyncAvailable) {
+            _message.value = "${account.provider.label} sync is not available in this build."
+            return
+        }
         _isBusy.value = true
         viewModelScope.launch {
             try {
@@ -3043,6 +3090,29 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                 val result = connectorStore.markSyncFailed(id, message = "Could not reach connector sync: $detail.")
                 _emailAccounts.value = result.accounts
                 _message.value = result.message
+            } finally {
+                _isBusy.value = false
+            }
+        }
+    }
+
+    fun openEmailAttachment(attachment: ReceiptEmailAttachment) {
+        val storageKey = attachment.storageKey
+        if (!attachment.canOpen || storageKey.isNullOrBlank()) {
+            _message.value = "${attachment.filename} is metadata-only and cannot be opened."
+            return
+        }
+        _isBusy.value = true
+        viewModelScope.launch {
+            try {
+                val downloaded = connectorClient.downloadAttachment(storageKey)
+                val file = withContext(Dispatchers.IO) {
+                    saveAttachmentToCache(getApplication(), attachment.filename, downloaded.bytes)
+                }
+                openAttachmentFile(getApplication(), file, downloaded.contentType.ifBlank { attachment.mimeType })
+                _message.value = "Opening ${attachment.filename}."
+            } catch (error: Exception) {
+                _message.value = "Could not open ${attachment.filename}: ${error.message ?: "unknown error"}"
             } finally {
                 _isBusy.value = false
             }
@@ -3702,6 +3772,8 @@ data class ReceiptEmailAttachment(
     val stored: Boolean,
     val skippedReason: String?
 ) {
+    val canOpen: Boolean get() = stored && !storageKey.isNullOrBlank()
+
     val statusLabel: String
         get() = when {
             stored -> "Attached"
@@ -3852,65 +3924,42 @@ private enum class SearchDateFilter(val label: String) {
     }
 }
 
-private fun openEmailUrl(context: Context, emailUrl: String) {
-    val uri = emailLinkCandidates(emailUrl).firstOrNull() ?: return
-    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-        addCategory(Intent.CATEGORY_BROWSABLE)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    if (uri.host.orEmpty().equals("mail.google.com", ignoreCase = true)) {
-        val browserPackages = listOf(
-            "com.android.chrome",
-            "com.chrome.beta",
-            "com.microsoft.emmx",
-            "org.mozilla.firefox"
-        )
-        for (browserPackage in browserPackages) {
-            try {
-                context.startActivity(Intent(intent).setPackage(browserPackage))
-                return
-            } catch (_: Exception) {
-                // Try the next installed browser, then fall back to the chooser.
-            }
-        }
-    }
-    try {
-        context.startActivity(Intent.createChooser(intent, "Open original email").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
-    } catch (_: Exception) {
-        Toast.makeText(context, "Could not open the original email.", Toast.LENGTH_SHORT).show()
-    }
-}
-
-private fun emailLinkCandidates(emailUrl: String): List<Uri> {
-    val uri = runCatching { Uri.parse(emailUrl.trim()) }.getOrNull() ?: return emptyList()
-    if (uri.scheme !in setOf("http", "https")) return emptyList()
-    val host = uri.host.orEmpty().lowercase(Locale.US)
-    val allowedHost = listOf(
-        "mail.google.com",
-        "outlook.live.com",
-        "outlook.office.com",
-        "outlook.office365.com",
-        "mail.yahoo.com"
-    ).any { host == it || host.endsWith(".$it") }
-    if (!allowedHost) return emptyList()
-    val candidates = mutableListOf<Uri>()
-    if (host == "mail.google.com") {
-        val account = uri.getQueryParameter("authuser").orEmpty()
-        val fragment = uri.fragment.orEmpty()
-        if (account.isNotBlank() && fragment.isNotBlank()) {
-            candidates.add(Uri.parse("https://mail.google.com/mail/u/${Uri.encode(account)}/#$fragment"))
-        }
-    }
-    candidates.add(uri)
-    return candidates.distinct()
-}
-
 private fun createCameraUri(context: Context): Uri {
     val dir = File(context.cacheDir, "camera").apply { mkdirs() }
     val file = File.createTempFile("receipt_", ".jpg", dir)
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+}
+
+private fun saveAttachmentToCache(context: Context, filename: String, bytes: ByteArray): File {
+    val dir = File(context.cacheDir, "attachments").apply { mkdirs() }
+    val file = File(dir, safeLocalFilename(filename))
+    FileOutputStream(file).use { it.write(bytes) }
+    return file
+}
+
+private fun openAttachmentFile(context: Context, file: File, mimeType: String) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, mimeType.ifBlank { "application/octet-stream" })
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(Intent.createChooser(intent, "Open attachment").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        })
+    } catch (_: Exception) {
+        Toast.makeText(context, "No app can open this attachment.", Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun safeLocalFilename(filename: String): String {
+    val cleaned = filename
+        .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]+"), "-")
+        .trim('.', ' ', '-')
+        .take(120)
+    return cleaned.ifBlank { "attachment" }
 }
 
 private tailrec fun Context.findActivity(): Activity? {

@@ -8,27 +8,35 @@ import java.util.UUID
 enum class EmailProvider(
     val label: String,
     val scopeLabel: String,
-    val receiptQuery: String
+    val receiptQuery: String,
+    val liveSyncAvailable: Boolean,
+    val unavailableMessage: String = ""
 ) {
     Gmail(
         "Gmail",
         "gmail.readonly",
-        "newer_than:90d (receipt OR order OR invoice OR \"purchase confirmation\" OR warranty)"
+        "newer_than:90d (receipt OR order OR invoice OR bill OR statement OR warranty)",
+        true
     ),
     Outlook(
         "Outlook",
         "Microsoft Graph Mail.Read delegated",
-        "receipt OR order OR invoice OR purchase confirmation OR warranty"
+        "receipt OR order OR invoice OR bill OR statement OR warranty",
+        true
     ),
     Yahoo(
         "Yahoo",
         "Yahoo OAuth + IMAP read",
-        "receipt OR order OR invoice OR purchase confirmation OR warranty"
+        "receipt OR order OR invoice OR bill OR statement OR warranty",
+        false,
+        "Yahoo live sync is not available in this build."
     ),
     Imap(
         "Other IMAP",
         "OAuth/IMAP read",
-        "receipt OR order OR invoice OR purchase confirmation OR warranty"
+        "receipt OR order OR invoice OR bill OR statement OR warranty",
+        false,
+        "Manual IMAP live sync is not available in this build."
     )
 }
 

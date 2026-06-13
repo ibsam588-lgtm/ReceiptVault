@@ -2,14 +2,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="com.android.vending.BILLING" />
 
-    <!-- Package visibility (Android 11+): needed so getLaunchIntentForPackage can
-         resolve the native email apps when opening the original receipt email. -->
+    <!-- Package visibility (Android 11+): keeps common browsers visible for OAuth handoff. -->
     <queries>
         <package android:name="com.android.chrome" />
         <package android:name="com.chrome.beta" />
-        <package android:name="com.google.android.gm" />
         <package android:name="com.microsoft.emmx" />
-        <package android:name="com.microsoft.office.outlook" />
         <package android:name="org.mozilla.firefox" />
     </queries>
 

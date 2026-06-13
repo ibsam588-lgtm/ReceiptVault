@@ -280,6 +280,11 @@ export default {
       return json({ error: "plus_required" }, 402);
     }
 
+    if (url.pathname === "/v1/receipts/attachments") {
+      if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
+      return getReceiptAttachment(request, env, user);
+    }
+
     const objectName = objectNameFor(url.pathname, user.sub);
     if (!objectName) return json({ error: "bad_receipt_path" }, 400);
 
@@ -1770,6 +1775,41 @@ function receiptMetadataObjectName(userId: string, receiptId: string): string {
 
 function emailAttachmentObjectName(userId: string, receiptId: string, attachmentId: string, filename: string): string {
   return `users/${userId}/receipts/${receiptId}/attachments/${safeObjectName(attachmentId)}-${safeObjectName(filename)}`;
+}
+
+async function getReceiptAttachment(request: Request, env: Env, user: JWTPayload): Promise<Response> {
+  const userId = String(user.sub || "");
+  const key = new URL(request.url).searchParams.get("key") || "";
+  if (!isUserAttachmentKey(userId, key)) return json({ error: "bad_attachment_key" }, 400);
+
+  const object = await env.RECEIPTS_BUCKET.get(key);
+  if (!object) return json({ error: "attachment_not_found" }, 404);
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  if (!headers.has("content-type")) headers.set("content-type", "application/octet-stream");
+  headers.set("cache-control", "private, max-age=60");
+  headers.set("content-length", String(object.size));
+  headers.set("content-disposition", inlineContentDisposition(key.split("/").pop() || "attachment"));
+
+  return new Response(object.body, { headers });
+}
+
+function isUserAttachmentKey(userId: string, key: string): boolean {
+  if (!userId || !key || key.includes("..") || key.includes("\\") || key.includes("\0")) return false;
+  const prefix = `users/${userId}/receipts/`;
+  return key.startsWith(prefix) && key.includes("/attachments/");
+}
+
+function inlineContentDisposition(filename: string): string {
+  const fallback = filename.replace(/[\r\n"\\]/g, "_").slice(0, 120) || "attachment";
+  return `inline; filename="${fallback}"; filename*=UTF-8''${encodeRfc5987ValueChars(filename)}`;
+}
+
+function encodeRfc5987ValueChars(value: string): string {
+  return encodeURIComponent(value)
+    .replace(/['()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/\*/g, "%2A");
 }
 
 function safeObjectName(value: string): string {

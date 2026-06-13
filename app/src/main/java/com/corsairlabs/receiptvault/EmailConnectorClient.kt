@@ -5,6 +5,7 @@ import com.google.firebase.auth.FirebaseAuth
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,11 @@ data class RemoteConnectorAccount(
     val provider: EmailProvider,
     val emailAddress: String?,
     val connected: Boolean
+)
+
+data class DownloadedEmailAttachment(
+    val bytes: ByteArray,
+    val contentType: String
 )
 
 class EmailConnectorClient {
@@ -52,6 +58,11 @@ class EmailConnectorClient {
     suspend fun syncProvider(provider: EmailProvider): ConnectorSyncSummary {
         val token = firebaseToken()
         return postSync(token, provider)
+    }
+
+    suspend fun downloadAttachment(storageKey: String): DownloadedEmailAttachment {
+        val token = firebaseToken()
+        return getAttachment(token, storageKey)
     }
 
     private suspend fun firebaseToken(): String {
@@ -195,6 +206,27 @@ class EmailConnectorClient {
         }
     }
 
+    private suspend fun getAttachment(token: String, storageKey: String): DownloadedEmailAttachment = withContext(Dispatchers.IO) {
+        val encodedKey = URLEncoder.encode(storageKey, Charsets.UTF_8.name())
+        val connection = (URL("$apiBase/v1/receipts/attachments?key=$encodedKey").openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 10000
+            readTimeout = 60000
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+        val stream = if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream
+        if (connection.responseCode !in 200..299) {
+            val response = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            throw IOException(httpErrorMessage(connection.responseCode, response))
+        }
+        val bytes = stream.use { input -> input?.readBytes() ?: ByteArray(0) }
+        if (bytes.isEmpty()) throw IOException("Attachment was empty")
+        DownloadedEmailAttachment(
+            bytes = bytes,
+            contentType = connection.contentType?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
+        )
+    }
+
     private fun providerIdToEnum(id: String): EmailProvider? = when (id) {
         "gmail" -> EmailProvider.Gmail
         "outlook" -> EmailProvider.Outlook
@@ -237,6 +269,8 @@ class EmailConnectorClient {
             "missing_oauth_token" -> "OAuth token is missing. Disconnect and reconnect this email account."
             "missing_access_token" -> "OAuth access token is missing. Disconnect and reconnect this email account."
             "provider_sync_not_implemented" -> "Live sync for this email provider is not available in this build."
+            "bad_attachment_key" -> "Attachment is not available for this account."
+            "attachment_not_found" -> "Attachment file was not found in backup storage."
             else -> apiError ?: "HTTP $statusCode"
         }
     }
