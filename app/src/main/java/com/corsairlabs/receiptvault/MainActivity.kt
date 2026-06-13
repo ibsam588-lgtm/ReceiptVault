@@ -729,17 +729,16 @@ private fun HomeScreen(
     onWarranties: () -> Unit
 ) {
     val selectedCurrency = normalizeCurrencyCode(preferredCurrency) ?: defaultCurrencyCode()
-    val currencyReceipts = receipts.filter { it.normalizedCurrencyCode == selectedCurrency }
-    val totalLabel = formatReceiptTotal(currencyReceipts, selectedCurrency)
+    val totalLabel = formatReceiptTotal(receipts)
     // B16: filter to current calendar month so "This month" is accurate
     val thisMonthReceipts = run {
         val now = LocalDate.now()
-        currencyReceipts.filter {
+        receipts.filter {
             val d = Instant.ofEpochMilli(it.purchasedAtMillis).atZone(ZoneId.systemDefault()).toLocalDate()
             d.year == now.year && d.monthValue == now.monthValue
         }
     }
-    val thisMonthLabel = formatReceiptTotal(thisMonthReceipts, selectedCurrency)
+    val thisMonthLabel = formatReceiptTotal(thisMonthReceipts)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(18.dp),
@@ -843,7 +842,7 @@ private fun VaultHero(
                     color = Color.White,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.ExtraBold,
-                    maxLines = 2,
+                    maxLines = 4,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text("$count receipts saved", color = Color.White.copy(alpha = 0.72f))
@@ -876,7 +875,8 @@ private fun CurrencySelector(
     selectedCurrency: String,
     onCurrencyChange: (String) -> Unit,
     modifier: Modifier = Modifier,
-    light: Boolean = false
+    light: Boolean = false,
+    currencyCodes: List<String> = supportedCurrencyCodes()
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     Box(modifier = modifier) {
@@ -895,7 +895,7 @@ private fun CurrencySelector(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            supportedCurrencyCodes().forEach { code ->
+            currencyCodes.forEach { code ->
                 DropdownMenuItem(
                     text = {
                         Text(
@@ -2143,7 +2143,26 @@ private fun AnalyticsScreen(
     preferredCurrency: String = defaultCurrencyCode()
 ) {
     val selectedCurrency = normalizeCurrencyCode(preferredCurrency) ?: defaultCurrencyCode()
-    val currencyReceipts = receipts.filter { it.normalizedCurrencyCode == selectedCurrency }
+    val availableCurrencies = remember(receipts) { receiptCurrencyCodes(receipts) }
+    val fallbackAnalyticsCurrency = when {
+        selectedCurrency in availableCurrencies -> selectedCurrency
+        availableCurrencies.isNotEmpty() -> availableCurrencies.first()
+        else -> selectedCurrency
+    }
+    var analyticsCurrency by rememberSaveable { mutableStateOf(fallbackAnalyticsCurrency) }
+    LaunchedEffect(availableCurrencies, fallbackAnalyticsCurrency) {
+        if (availableCurrencies.isEmpty()) {
+            analyticsCurrency = fallbackAnalyticsCurrency
+        } else if (analyticsCurrency !in availableCurrencies) {
+            analyticsCurrency = fallbackAnalyticsCurrency
+        }
+    }
+    val activeAnalyticsCurrency = if (availableCurrencies.isEmpty()) {
+        fallbackAnalyticsCurrency
+    } else {
+        analyticsCurrency.takeIf { it in availableCurrencies } ?: fallbackAnalyticsCurrency
+    }
+    val currencyReceipts = receipts.filter { it.normalizedCurrencyCode == activeAnalyticsCurrency }
     // Build last 6 months spending data
     val monthlyData: List<Pair<String, Long>> = run {
         val calendar = java.util.Calendar.getInstance()
@@ -2171,14 +2190,15 @@ private fun AnalyticsScreen(
     val categoryColors = listOf(Teal, Coral, Amber, VaultBlue, Color(0xFF7C4DFF))
     val maxMonthly = monthlyData.maxOfOrNull { it.second }?.takeIf { it > 0 } ?: 1L
     val totalSpent = currencyReceipts.sumOf { it.amountCents }
-    val categorizedCount = currencyReceipts.count { it.normalizedCategory != "Uncategorized" }
-    val returnDateCount = currencyReceipts.count { it.returnByMillis != null }
-    val warrantyDateCount = currencyReceipts.count { it.warrantyUntilMillis != null }
+    val categorizedCount = receipts.count { it.normalizedCategory != "Uncategorized" }
+    val returnDateCount = receipts.count { it.returnByMillis != null }
+    val warrantyDateCount = receipts.count { it.warrantyUntilMillis != null }
     val avgAmountLabel = if (currencyReceipts.isNotEmpty()) {
-        formatCurrency(totalSpent / currencyReceipts.size, selectedCurrency)
+        formatCurrency(totalSpent / currencyReceipts.size, activeAnalyticsCurrency)
     } else {
-        formatCurrency(0, selectedCurrency)
+        formatCurrency(0, activeAnalyticsCurrency)
     }
+    val totalSpentLabel = formatReceiptTotal(receipts)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -2188,9 +2208,9 @@ private fun AnalyticsScreen(
         item {
             // Stats row
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatCard(Modifier.weight(1f), "Total spent", formatCurrency(totalSpent, selectedCurrency), Teal)
-                StatCard(Modifier.weight(1f), "Avg receipt", avgAmountLabel, Coral)
-                StatCard(Modifier.weight(1f), "Receipts", currencyReceipts.size.toString(), Amber)
+                StatCard(Modifier.weight(1f), "Total spent", totalSpentLabel, Teal)
+                StatCard(Modifier.weight(1f), "Avg $activeAnalyticsCurrency", avgAmountLabel, Coral)
+                StatCard(Modifier.weight(1f), "Receipts", receipts.size.toString(), Amber)
             }
         }
         item {
@@ -2200,11 +2220,31 @@ private fun AnalyticsScreen(
                 StatCard(Modifier.weight(1f), "Warranties", warrantyDateCount.toString(), Amber)
             }
         }
+        if (availableCurrencies.size > 1) {
+            item {
+                Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Analytics currency", fontWeight = FontWeight.ExtraBold)
+                        CurrencySelector(
+                            selectedCurrency = activeAnalyticsCurrency,
+                            onCurrencyChange = { analyticsCurrency = it },
+                            currencyCodes = availableCurrencies
+                        )
+                    }
+                }
+            }
+        }
         item {
             // Monthly bar chart
             Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Monthly spending", fontWeight = FontWeight.ExtraBold)
+                    Text("Monthly spending - $activeAnalyticsCurrency", fontWeight = FontWeight.ExtraBold)
                     if (monthlyData.all { it.second == 0L }) {
                         Text("No spending data yet.", color = Muted, style = MaterialTheme.typography.bodySmall)
                     } else {
@@ -2316,7 +2356,7 @@ private fun AnalyticsScreen(
         }
         // Issue 5: tax-ready CSV export for Business plan users
         if (activePlan == ReceiptVaultPlan.Business) {
-            item { TaxExportCard(currencyReceipts) }
+            item { TaxExportCard(receipts) }
         }
     }
 }
@@ -2402,7 +2442,12 @@ private fun StatCard(
                     .background(accent)
             )
             Spacer(Modifier.height(10.dp))
-            Text(value, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                value,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = if (value.contains('\n')) 3 else 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Text(label, color = Muted, style = MaterialTheme.typography.labelSmall)
         }
     }
@@ -4246,12 +4291,19 @@ private fun formatReceiptTotal(receipts: List<Receipt>, currencyCode: String? = 
     }
 }
 
+private fun receiptCurrencyCodes(receipts: List<Receipt>): List<String> =
+    receipts
+        .map { it.normalizedCurrencyCode }
+        .distinct()
+        .sorted()
+
 private fun formatCurrency(cents: Long, currencyCode: String = defaultCurrencyCode()): String {
-    val currency = runCatching { Currency.getInstance(normalizeCurrencyCode(currencyCode) ?: defaultCurrencyCode()) }
-        .getOrElse { Currency.getInstance(defaultCurrencyCode()) }
-    return NumberFormat.getCurrencyInstance(Locale.getDefault()).apply {
-        this.currency = currency
+    val normalizedCurrency = normalizeCurrencyCode(currencyCode) ?: defaultCurrencyCode()
+    val amount = NumberFormat.getNumberInstance(Locale.getDefault()).apply {
+        minimumFractionDigits = 2
+        maximumFractionDigits = 2
     }.format(cents / 100.0)
+    return "$normalizedCurrency $amount"
 }
 
 private fun formatFileSize(bytes: Long): String {
