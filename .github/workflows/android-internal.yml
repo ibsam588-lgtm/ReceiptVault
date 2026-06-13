@@ -56,12 +56,34 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
+      - name: Locate Play debug files
+        id: play_debug_files
+        run: |
+          native_symbols="app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+          mapping_file="app/build/outputs/mapping/release/mapping.txt"
+
+          if [ -f "$native_symbols" ]; then
+            echo "native_symbols=$native_symbols" >> "$GITHUB_OUTPUT"
+          else
+            echo "Native debug symbols were not generated at $native_symbols"
+            find app/build/outputs -maxdepth 5 -type f | sort
+          fi
+
+          if [ -f "$mapping_file" ]; then
+            echo "mapping_file=$mapping_file" >> "$GITHUB_OUTPUT"
+          else
+            echo "R8 mapping file was not generated at $mapping_file"
+          fi
+
       - name: Upload bundle artifact
         continue-on-error: true
         uses: actions/upload-artifact@v6
         with:
           name: receiptvault-release-aab
-          path: app/build/outputs/bundle/release/app-release.aab
+          path: |
+            app/build/outputs/bundle/release/app-release.aab
+            app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip
+            app/build/outputs/mapping/release/mapping.txt
           retention-days: 1
 
       - name: Upload to Google Play internal testing
@@ -71,6 +93,8 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: com.corsairlabs.receiptvault
           releaseFiles: app/build/outputs/bundle/release/app-release.aab
+          mappingFile: ${{ steps.play_debug_files.outputs.mapping_file }}
+          debugSymbols: ${{ steps.play_debug_files.outputs.native_symbols }}
           tracks: internal
           status: completed
 
