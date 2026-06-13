@@ -142,16 +142,15 @@ text, attachments, or AI outputs.
 
 ```json
 {
-  "provider": "gmail",
-  "maxCandidates": 10
+  "provider": "gmail"
 }
 ```
 
 The endpoint scans only provider receipt-query candidates, stores a sync report,
-and does not store unrelated mailbox content. Gmail and Outlook header/snippet
-candidate scans are implemented. Yahoo and manual IMAP are marked ready, but
-provider-specific IMAP polling still needs to be added before body/attachment
-imports are enabled.
+and does not store unrelated mailbox content. Gmail and Outlook body plus
+eligible attachment imports are implemented. The Worker enforces monthly import
+limits server-side: Free 10, Plus 250, and Business 1000. Yahoo and manual IMAP
+remain unavailable in the Android UI until provider-specific polling is added.
 
 `GET /v1/connectors/sync/status` returns the user's stored sync reports.
 

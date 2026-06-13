@@ -9,8 +9,8 @@ import androidx.work.WorkerParameters
  *
  * Uses the same [EmailConnectorClient] / [EmailConnectorStore] / [ReceiptStore] logic as the
  * manual "Sync" action in the app, so receipts imported in the background show up the next time
- * the app loads its local store. The Cloudflare Worker enforces plan-based scan limits
- * (Plus: 100, Business: 500 with full Gmail pagination) server-side.
+ * the app loads its local store. The Cloudflare Worker enforces plan-based monthly import
+ * limits server-side.
  */
 class EmailSyncWorker(
     appContext: Context,
@@ -57,16 +57,18 @@ class EmailSyncWorker(
                         }
                     }
                 }
-                val syncMessage = if (summary.imported > 0 && importedNow == 0) {
-                    "No new purchase documents to import."
-                } else {
-                    summary.message
+                val syncMessage = when {
+                    summary.status == "import_limit_reached" -> summary.message
+                    summary.imported > 0 && importedNow == 0 -> "No new purchase documents to import."
+                    else -> summary.message
                 }
                 connectorStore.markSyncReady(
                     id = account.id,
                     scanned = summary.scanned,
                     candidates = summary.candidates,
                     imported = importedNow,
+                    monthlyImportUsed = summary.monthlyImportUsed,
+                    monthlyImportLimit = summary.monthlyImportLimit,
                     message = syncMessage
                 )
             } catch (error: Exception) {

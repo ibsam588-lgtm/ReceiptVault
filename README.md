@@ -38,14 +38,14 @@ Core promise:
 
 - Free: $0, local-first storage, 50 stored receipts, 5 warranty items,
   manual camera/image/share imports, 10 automatic email receipt imports per month,
-  basic OCR, and basic categories.
+  basic OCR, basic categories, and ads.
 - Plus: $4.99/month or $47.99/year, 1,000 receipts, Cloudflare R2 backup,
   up to 3 connected email accounts, 250 automatic email receipt imports per month,
-  unlimited warranties, reminders, advanced search, CSV/PDF export, and Gemini
-  categorization.
+  no ads, unlimited warranties, reminders, advanced search, CSV/PDF export, and
+  Gemini categorization.
 - Business: $12.99/month or $124.99/year, higher receipt and email import limits,
-  up to 10 connected email accounts, business folders, tax/export reports, and
-  priority support.
+  no ads, up to 10 connected email accounts, business folders, tax/export
+  reports, and priority support.
 
 ## Android Stack
 
@@ -58,6 +58,8 @@ Core promise:
 - Billing: Google Play Billing Library with subscription product IDs for Plus
   and Business, plus Worker-side Google Play token verification when the service
   account secret is configured.
+- Ads: Google Mobile Ads SDK. Free users see banner ads plus an interstitial
+  launch ad every second app visit; Plus and Business users do not see ads.
 - Cloud backup: Cloudflare Worker plus R2, gated by Firebase Auth and paid plan claims.
 
 ## Built Features
@@ -76,6 +78,8 @@ Core promise:
   with encrypted server-side connector token storage.
 - Google Play Billing subscription cards for Plus monthly/yearly and Business
   monthly/yearly, using live Play pricing when the products are active.
+- AdMob banner and interstitial ad slots for Free users, configured through
+  build-time GitHub Actions secrets.
 - Worker endpoint for Google Play purchase verification:
   `POST /v1/billing/google-play/purchase`.
 - Local receipt vault, search, warranty screen, detail view, and Plus plan screen.
@@ -91,6 +95,9 @@ Core promise:
   `GOOGLE_SIGN_IN_WEB_CLIENT_ID` from GitHub Actions secrets. If the secret is
   not present, the app falls back to the Firebase-generated
   `default_web_client_id` resource.
+- Ads: release builds read `ADMOB_APP_ID`, `ADMOB_BANNER_AD_UNIT_ID`, and
+  `ADMOB_INTERSTITIAL_AD_UNIT_ID` from GitHub Actions secrets. Local builds use
+  Google's test ad IDs until real AdMob units are configured.
 
 Google SSO launch requirements:
 
@@ -163,12 +170,11 @@ Gemini project status:
 - Live Worker categorization smoke test passed with `gemini-2.5-flash-lite` and
   returned structured receipt fields.
 
-Full automatic mailbox import is not part of the MVP runtime yet. The current
-connector work stores OAuth/IMAP credentials, runs scheduled Gmail and Outlook
-receipt-query candidate scans, writes encrypted sync reports, and keeps
-Yahoo/IMAP marked ready without reading mailbox content. Full body/attachment
-import still needs the candidate-only importer before receipt/order records are
-created automatically.
+Automatic Gmail and Outlook imports scan receipt/order/bill/invoice/warranty
+candidates, import matching message text and eligible attachments, and dedupe by
+provider message ID so repeated syncs do not recreate old receipts. Free users
+are capped at 10 automatic email imports per month; Plus is capped at 250 and
+Business at 1000.
 
 Google Play Billing product IDs:
 

@@ -130,15 +130,15 @@ class EmailConnectorClient {
         val connection = (URL("$apiBase/v1/connectors/sync").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 10000
-            // Paid plans can scan up to 500 messages with pagination, which takes longer.
+            // Paid plans can scan deeper mailbox history with pagination, which takes longer.
             readTimeout = 120000
             doOutput = true
             setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Content-Type", "application/json")
         }
 
-        // No maxCandidates: the Worker applies the plan-based limit
-        // (Free: 10, Plus: 100, Business: 500 with full Gmail pagination).
+        // No maxCandidates: the Worker applies the plan-based monthly import limit
+        // (Free: 10, Plus: 250, Business: 1000).
         val body = JSONObject()
             .put("provider", provider.providerId)
             .toString()
@@ -176,6 +176,9 @@ class EmailConnectorClient {
             ok = ok,
             status = status,
             error = apiError,
+            monthlyImportLimit = report.optionalInt("monthlyImportLimit"),
+            monthlyImportUsed = report.optionalInt("monthlyImportUsed"),
+            monthlyImportRemaining = report.optionalInt("monthlyImportRemaining"),
             receipts = receiptsList
         )
     }
@@ -292,3 +295,6 @@ private suspend fun <T> Task<T>.await(): T =
         addOnSuccessListener { result -> continuation.resume(result) }
         addOnFailureListener { error -> continuation.resumeWithException(error) }
     }
+
+private fun JSONObject.optionalInt(key: String): Int? =
+    if (has(key) && !isNull(key)) optInt(key) else null

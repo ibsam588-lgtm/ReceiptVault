@@ -15,6 +15,15 @@ val configuredVersionName = providers.environmentVariable("ANDROID_VERSION_NAME"
 val googleSignInWebClientId = providers.environmentVariable("GOOGLE_SIGN_IN_WEB_CLIENT_ID").orNull
     ?: providers.gradleProperty("GOOGLE_SIGN_IN_WEB_CLIENT_ID").orNull
     ?: ""
+val admobAppId = providers.environmentVariable("ADMOB_APP_ID").orNull
+    ?: providers.gradleProperty("ADMOB_APP_ID").orNull
+    ?: "ca-app-pub-3940256099942544~3347511713"
+val admobBannerAdUnitId = providers.environmentVariable("ADMOB_BANNER_AD_UNIT_ID").orNull
+    ?: providers.gradleProperty("ADMOB_BANNER_AD_UNIT_ID").orNull
+    ?: "ca-app-pub-3940256099942544/6300978111"
+val admobInterstitialAdUnitId = providers.environmentVariable("ADMOB_INTERSTITIAL_AD_UNIT_ID").orNull
+    ?: providers.gradleProperty("ADMOB_INTERSTITIAL_AD_UNIT_ID").orNull
+    ?: "ca-app-pub-3940256099942544/1033173712"
 
 if (googleSignInWebClientId.isBlank()) {
     logger.warn(
@@ -37,6 +46,9 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "R2_BACKUP_API_URL", "\"https://receiptvault-backup.ibsam588.workers.dev\"")
         buildConfigField("String", "GOOGLE_SIGN_IN_WEB_CLIENT_ID", "\"${googleSignInWebClientId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "ADMOB_BANNER_AD_UNIT_ID", "\"${admobBannerAdUnitId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "ADMOB_INTERSTITIAL_AD_UNIT_ID", "\"${admobInterstitialAdUnitId.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        manifestPlaceholders["ADMOB_APP_ID"] = admobAppId
     }
 
     signingConfigs {
@@ -97,6 +109,7 @@ dependencies {
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.document.scanner)
     implementation(libs.play.billing)
+    implementation(libs.play.services.ads)
     implementation(libs.play.services.auth)
     implementation(libs.androidx.work.runtime.ktx)
 

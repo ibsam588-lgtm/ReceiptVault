@@ -145,9 +145,19 @@ type ConnectorSyncReport = {
   receipts?: Record<string, unknown>[];
   error?: string;
   plan?: EffectivePlan;
+  monthlyImportLimit?: number;
+  monthlyImportUsed?: number;
+  monthlyImportRemaining?: number;
 };
 
 type EffectivePlan = "free" | "plus" | "business";
+
+type MonthlyImportUsage = {
+  period: string;
+  used: number;
+  limit: number;
+  remaining: number;
+};
 
 type OAuthState = {
   provider: ConnectorProviderId;
@@ -173,6 +183,11 @@ const GEMINI_EMAIL_TEXT_LIMIT = 6000;
 const MAX_ATTACHMENTS_PER_DOCUMENT = 8;
 const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 const MAX_ATTACHMENT_TOTAL_BYTES = 16 * 1024 * 1024;
+const MONTHLY_IMPORT_LIMITS: Record<EffectivePlan, number> = {
+  free: 10,
+  plus: 250,
+  business: 1000
+};
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -913,7 +928,7 @@ async function loadBillingEntitlement(env: Env, userId: string): Promise<{ activ
 }
 
 function planSyncLimit(plan: EffectivePlan, requested: unknown): number {
-  const max = plan === "business" ? 500 : plan === "plus" ? 100 : 10;
+  const max = MONTHLY_IMPORT_LIMITS[plan];
   const r = typeof requested === "number" ? requested : typeof requested === "string" ? Number(requested) : max;
   if (!Number.isFinite(r) || r <= 0) return max;
   return Math.min(Math.floor(r), max);
@@ -1004,6 +1019,11 @@ async function syncProviderForUser(
     const refreshed = await ensureAccessToken(env, userId, provider, tokens);
     if (!refreshed.access_token) return syncError(providerId, syncedAt, "missing_access_token");
 
+    const startingUsage = await loadMonthlyImportUsage(env, userId, plan);
+    if (startingUsage.remaining <= 0) {
+      return syncImportLimitReached(providerId, syncedAt, plan, startingUsage);
+    }
+
     const sinceIso = connectorSyncSince(metadata);
     const candidates = providerId === "gmail"
       ? await fetchGmailCandidates(provider, refreshed.access_token, maxCandidates, paginate, metadata.emailAddress, sinceIso)
@@ -1019,7 +1039,10 @@ async function syncProviderForUser(
 
     // Fetch full body for each receipt candidate and create receipt records
     const importedReceipts: Record<string, unknown>[] = [];
+    let remainingImports = startingUsage.remaining;
     for (const candidate of receiptCandidates) {
+      if (remainingImports <= 0) break;
+
       // Use provider-prefixed message ID as receipt ID so duplicate syncs can be skipped.
       const receiptId = `${providerId}-${candidate.id}`;
       const objectName = receiptMetadataObjectName(userId, receiptId);
@@ -1099,13 +1122,16 @@ async function syncProviderForUser(
         { httpMetadata: { contentType: "application/json" } }
       );
       importedReceipts.push(receipt);
+      remainingImports--;
     }
+    const finalUsage = await incrementMonthlyImportUsage(env, userId, plan, importedReceipts.length);
     await updateConnectorLastSuccessfulSyncAt(env, userId, providerId, syncedAt);
 
+    const reachedLimit = finalUsage.remaining <= 0 && importedReceipts.length < receiptCandidates.length;
     return {
       ok: true,
       provider: providerId,
-      status: "import_complete",
+      status: reachedLimit ? "import_limit_reached" : "import_complete",
       syncedAt,
       scanned: candidates.length,
       candidates: receiptCandidates.length,
@@ -1113,8 +1139,13 @@ async function syncProviderForUser(
       matchedSignals,
       receipts: importedReceipts,
       plan,
+      monthlyImportLimit: finalUsage.limit,
+      monthlyImportUsed: finalUsage.used,
+      monthlyImportRemaining: finalUsage.remaining,
       message: importedReceipts.length > 0
-        ? `Imported ${importedReceipts.length} purchase document${importedReceipts.length === 1 ? "" : "s"} from ${candidates.length} scanned messages.`
+        ? reachedLimit
+          ? `Imported ${importedReceipts.length} purchase document${importedReceipts.length === 1 ? "" : "s"} and reached the ${finalUsage.limit}/month ${plan} import limit.`
+          : `Imported ${importedReceipts.length} purchase document${importedReceipts.length === 1 ? "" : "s"} from ${candidates.length} scanned messages.`
         : receiptCandidates.length > 0
         ? `Scanned ${candidates.length} messages; no new purchase documents to import.`
         : `Scanned ${candidates.length} messages; none matched receipt, bill, invoice, warranty, order, or statement signals strongly enough to import.`
@@ -1368,6 +1399,29 @@ async function fetchGmailMessageContent(
   return {
     text: textParts.join("\n").replace(/\s{3,}/g, " ").trim().slice(0, EMAIL_BODY_TEXT_LIMIT),
     attachments
+  };
+}
+
+function syncImportLimitReached(
+  provider: ConnectorProviderId,
+  syncedAt: string,
+  plan: EffectivePlan,
+  usage: MonthlyImportUsage
+): ConnectorSyncReport {
+  return {
+    ok: true,
+    provider,
+    status: "import_limit_reached",
+    syncedAt,
+    scanned: 0,
+    candidates: 0,
+    imported: 0,
+    matchedSignals: [],
+    plan,
+    monthlyImportLimit: usage.limit,
+    monthlyImportUsed: usage.used,
+    monthlyImportRemaining: usage.remaining,
+    message: `${planLabel(plan)} import limit reached for ${usage.period}: ${usage.used}/${usage.limit}. Upgrade to Plus for more monthly imports.`
   };
 }
 
@@ -1767,6 +1821,64 @@ async function listConnectorSyncReports(env: Env, user: JWTPayload): Promise<Res
 
 function connectorSyncReportObjectName(userId: string, provider: ConnectorProviderId): string {
   return `users/${userId}/connectors/${provider}/last-sync.json`;
+}
+
+function monthlyImportUsageObjectName(userId: string, period: string): string {
+  return `users/${userId}/connectors/import-usage/${period}.json`;
+}
+
+function currentUsagePeriod(date = new Date()): string {
+  return date.toISOString().slice(0, 7);
+}
+
+async function loadMonthlyImportUsage(env: Env, userId: string, plan: EffectivePlan): Promise<MonthlyImportUsage> {
+  const period = currentUsagePeriod();
+  const limit = monthlyImportLimit(plan);
+  const object = await env.RECEIPTS_BUCKET.get(monthlyImportUsageObjectName(userId, period));
+  const data = object
+    ? await object.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}))
+    : {};
+  const used = Math.max(0, Math.floor(numberFromUnknown(data.used) || 0));
+  return {
+    period,
+    used,
+    limit,
+    remaining: Math.max(0, limit - used)
+  };
+}
+
+async function incrementMonthlyImportUsage(
+  env: Env,
+  userId: string,
+  plan: EffectivePlan,
+  imported: number
+): Promise<MonthlyImportUsage> {
+  const current = await loadMonthlyImportUsage(env, userId, plan);
+  const used = Math.min(current.limit, current.used + Math.max(0, Math.floor(imported)));
+  const updated: MonthlyImportUsage = {
+    ...current,
+    used,
+    remaining: Math.max(0, current.limit - used)
+  };
+  await env.RECEIPTS_BUCKET.put(monthlyImportUsageObjectName(userId, updated.period), JSON.stringify({
+    period: updated.period,
+    plan,
+    used: updated.used,
+    limit: updated.limit,
+    remaining: updated.remaining,
+    updatedAt: new Date().toISOString()
+  }), {
+    httpMetadata: { contentType: "application/json" }
+  });
+  return updated;
+}
+
+function monthlyImportLimit(plan: EffectivePlan): number {
+  return MONTHLY_IMPORT_LIMITS[plan];
+}
+
+function planLabel(plan: EffectivePlan): string {
+  return plan.charAt(0).toUpperCase() + plan.slice(1);
 }
 
 function receiptMetadataObjectName(userId: string, receiptId: string): string {

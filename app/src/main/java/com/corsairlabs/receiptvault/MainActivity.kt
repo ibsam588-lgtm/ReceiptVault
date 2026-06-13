@@ -116,6 +116,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.ui.input.pointer.pointerInput
@@ -128,6 +129,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.tasks.Task
 import com.google.firebase.auth.FirebaseAuth
@@ -401,6 +405,18 @@ private fun ReceiptVaultApp(
     val message by viewModel.message.collectAsState()
     val pendingExternalUrl by viewModel.pendingExternalUrl.collectAsState()
     val context = LocalContext.current
+    val showFreeAds = activePlan == ReceiptVaultPlan.Free && !billingState.loading
+    val adController = remember(context) {
+        context.findActivity()?.let { ReceiptVaultAdController(it) }
+    }
+
+    LaunchedEffect(showFreeAds, adController) {
+        if (showFreeAds) {
+            adController?.startForFreeUser()
+        } else {
+            adController?.stopForPaidUser()
+        }
+    }
 
     // B5: wrap in try/catch — ActivityNotFoundException if no browser is installed
     LaunchedEffect(pendingExternalUrl) {
@@ -426,22 +442,25 @@ private fun ReceiptVaultApp(
         },
         bottomBar = {
             Surface(color = Color.White) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(96.dp)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    NavItem(AppScreen.Home, currentScreen, onScreenChange)
-                    NavItem(AppScreen.Search, currentScreen, onScreenChange)
-                    NavItem(AppScreen.Scan, currentScreen, onScreenChange)
-                    NavItem(AppScreen.Email, currentScreen, onScreenChange)
-                    NavItem(AppScreen.Warranties, currentScreen, onScreenChange)
-                    NavItem(AppScreen.Analytics, currentScreen, onScreenChange)
-                    NavItem(AppScreen.Plus, currentScreen, onScreenChange)
+                Column {
+                    FreeBannerAd(show = showFreeAds)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(96.dp)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        NavItem(AppScreen.Home, currentScreen, onScreenChange)
+                        NavItem(AppScreen.Search, currentScreen, onScreenChange)
+                        NavItem(AppScreen.Scan, currentScreen, onScreenChange)
+                        NavItem(AppScreen.Email, currentScreen, onScreenChange)
+                        NavItem(AppScreen.Warranties, currentScreen, onScreenChange)
+                        NavItem(AppScreen.Analytics, currentScreen, onScreenChange)
+                        NavItem(AppScreen.Plus, currentScreen, onScreenChange)
+                    }
                 }
             }
         }
@@ -1548,6 +1567,7 @@ private fun PlusScreen(
         }
         item { FeatureRow("1,000 stored receipts", Icons.Default.CheckCircle) }
         item { FeatureRow("Cloud backup", Icons.Default.Shield) }
+        item { FeatureRow("No banner or video ads", Icons.Default.CheckCircle) }
         item { FeatureRow("AI receipt categorization", Icons.Default.Star) }
         item { FeatureRow("3 connected email accounts", Icons.Default.Email) }
         item { FeatureRow("250 receipt email imports monthly", Icons.Default.Email) }
@@ -2571,6 +2591,23 @@ private fun MessageBar(message: String, onDismiss: () -> Unit) {
 }
 
 @Composable
+private fun FreeBannerAd(show: Boolean) {
+    if (!show) return
+    AndroidView(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp),
+        factory = { context ->
+            AdView(context).apply {
+                setAdSize(AdSize.BANNER)
+                adUnitId = BuildConfig.ADMOB_BANNER_AD_UNIT_ID
+                loadAd(AdRequest.Builder().build())
+            }
+        }
+    )
+}
+
+@Composable
 private fun RowScope.NavItem(screen: AppScreen, current: AppScreen, onChange: (AppScreen) -> Unit) {
     val selected = current == screen
     val color = if (selected) TealDark else Muted
@@ -3069,16 +3106,18 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
                 }
-                val syncMessage = if (summary.imported > 0 && importedNow == 0) {
-                    "No new purchase documents to import."
-                } else {
-                    summary.message
+                val syncMessage = when {
+                    summary.status == "import_limit_reached" -> summary.message
+                    summary.imported > 0 && importedNow == 0 -> "No new purchase documents to import."
+                    else -> summary.message
                 }
                 val result = connectorStore.markSyncReady(
                     id = id,
                     scanned = summary.scanned,
                     candidates = summary.candidates,
                     imported = importedNow,
+                    monthlyImportUsed = summary.monthlyImportUsed,
+                    monthlyImportLimit = summary.monthlyImportLimit,
                     message = syncMessage
                 )
                 _emailAccounts.value = result.accounts

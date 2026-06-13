@@ -9,11 +9,12 @@ const products = [
   {
     id: "receiptvault_plus_monthly",
     title: "ReceiptVault Plus Monthly",
-    description: "ReceiptVault Plus monthly cloud backup and smart receipt tools.",
+    description: "ReceiptVault Plus monthly no-ad cloud backup and smart receipt tools.",
     tag: "plus",
     period: "P1M",
     price: "4.99",
     benefits: [
+      "No ads",
       "Cloud receipt backup",
       "Multiple email imports",
       "Smart categorization",
@@ -23,11 +24,12 @@ const products = [
   {
     id: "receiptvault_plus_yearly",
     title: "ReceiptVault Plus Yearly",
-    description: "ReceiptVault Plus yearly cloud backup and smart receipt tools.",
+    description: "ReceiptVault Plus yearly no-ad cloud backup and smart receipt tools.",
     tag: "plus",
     period: "P1Y",
     price: "47.99",
     benefits: [
+      "No ads",
       "Cloud receipt backup",
       "Multiple email imports",
       "Smart categorization",
@@ -37,11 +39,12 @@ const products = [
   {
     id: "receiptvault_business_monthly",
     title: "ReceiptVault Business Monthly",
-    description: "ReceiptVault Business monthly receipt backup and team-ready expense tools.",
+    description: "ReceiptVault Business monthly no-ad receipt backup and team-ready expense tools.",
     tag: "business",
     period: "P1M",
     price: "12.99",
     benefits: [
+      "No ads",
       "Higher import limits",
       "Business receipt backup",
       "Smart categorization",
@@ -51,11 +54,12 @@ const products = [
   {
     id: "receiptvault_business_yearly",
     title: "ReceiptVault Business Yearly",
-    description: "ReceiptVault Business yearly receipt backup and team-ready expense tools.",
+    description: "ReceiptVault Business yearly no-ad receipt backup and team-ready expense tools.",
     tag: "business",
     period: "P1Y",
     price: "124.99",
     benefits: [
+      "No ads",
       "Higher import limits",
       "Business receipt backup",
       "Smart categorization",

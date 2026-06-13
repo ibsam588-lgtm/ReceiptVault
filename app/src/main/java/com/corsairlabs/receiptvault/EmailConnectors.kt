@@ -3,6 +3,7 @@ package com.corsairlabs.receiptvault
 import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.YearMonth
 import java.util.UUID
 
 enum class EmailProvider(
@@ -64,6 +65,7 @@ data class EmailConnectorAccount(
     val status: ConnectorStatus,
     val monthlyImportCount: Int,
     val monthlyImportLimit: Int,
+    val monthlyImportPeriod: String,
     val lastSyncMillis: Long?,
     val lastMessage: String
 ) {
@@ -74,24 +76,30 @@ data class EmailConnectorAccount(
         .put("status", status.name)
         .put("monthlyImportCount", monthlyImportCount)
         .put("monthlyImportLimit", monthlyImportLimit)
+        .put("monthlyImportPeriod", monthlyImportPeriod)
         .put("lastSyncMillis", lastSyncMillis)
         .put("lastMessage", lastMessage)
 
     companion object {
-        fun fromJson(json: JSONObject): EmailConnectorAccount = EmailConnectorAccount(
-            id = json.optString("id", UUID.randomUUID().toString()),
-            provider = runCatching {
-                EmailProvider.valueOf(json.optString("provider", EmailProvider.Gmail.name))
-            }.getOrDefault(EmailProvider.Gmail),
-            emailAddress = json.optString("emailAddress", "Email account"),
-            status = runCatching {
-                ConnectorStatus.valueOf(json.optString("status", ConnectorStatus.OAuthPending.name))
-            }.getOrDefault(ConnectorStatus.OAuthPending),
-            monthlyImportCount = json.optInt("monthlyImportCount", 0),
-            monthlyImportLimit = json.optInt("monthlyImportLimit", ReceiptVaultPlan.Free.monthlyEmailImports),
-            lastSyncMillis = if (json.isNull("lastSyncMillis") || !json.has("lastSyncMillis")) null else json.optLong("lastSyncMillis"),
-            lastMessage = json.optString("lastMessage", "Waiting for OAuth setup")
-        )
+        fun fromJson(json: JSONObject): EmailConnectorAccount {
+            val currentPeriod = currentImportPeriod()
+            val storedPeriod = json.optString("monthlyImportPeriod", currentPeriod).ifBlank { currentPeriod }
+            return EmailConnectorAccount(
+                id = json.optString("id", UUID.randomUUID().toString()),
+                provider = runCatching {
+                    EmailProvider.valueOf(json.optString("provider", EmailProvider.Gmail.name))
+                }.getOrDefault(EmailProvider.Gmail),
+                emailAddress = json.optString("emailAddress", "Email account"),
+                status = runCatching {
+                    ConnectorStatus.valueOf(json.optString("status", ConnectorStatus.OAuthPending.name))
+                }.getOrDefault(ConnectorStatus.OAuthPending),
+                monthlyImportCount = if (storedPeriod == currentPeriod) json.optInt("monthlyImportCount", 0) else 0,
+                monthlyImportLimit = json.optInt("monthlyImportLimit", ReceiptVaultPlan.Free.monthlyEmailImports),
+                monthlyImportPeriod = currentPeriod,
+                lastSyncMillis = if (json.isNull("lastSyncMillis") || !json.has("lastSyncMillis")) null else json.optLong("lastSyncMillis"),
+                lastMessage = json.optString("lastMessage", "Waiting for OAuth setup")
+            )
+        }
     }
 }
 
@@ -117,6 +125,9 @@ data class ConnectorSyncSummary(
     val ok: Boolean = true,
     val status: String = "",
     val error: String = "",
+    val monthlyImportLimit: Int? = null,
+    val monthlyImportUsed: Int? = null,
+    val monthlyImportRemaining: Int? = null,
     val receipts: List<org.json.JSONObject> = emptyList()
 )
 
@@ -164,6 +175,7 @@ class EmailConnectorStore(private val context: Context) {
             status = status,
             monthlyImportCount = 0,
             monthlyImportLimit = plan.monthlyEmailImports,
+            monthlyImportPeriod = currentImportPeriod(),
             lastSyncMillis = null,
             lastMessage = lastMessage
         )
@@ -177,18 +189,22 @@ class EmailConnectorStore(private val context: Context) {
         scanned: Int = 0,
         candidates: Int = 0,
         imported: Int = 0,
+        monthlyImportUsed: Int? = null,
+        monthlyImportLimit: Int? = null,
         message: String = "Purchase-document sync check completed."
     ): ConnectorStoreResult {
+        val period = currentImportPeriod()
+        val planLimit = currentPlan().monthlyEmailImports
         val updated = loadAccounts().map { account ->
             if (account.id == id) {
                 account.copy(
                     status = ConnectorStatus.SyncReady,
                     lastSyncMillis = System.currentTimeMillis(),
-                    monthlyImportCount = account.monthlyImportCount + imported,
-                    lastMessage = if (scanned > 0 || candidates > 0 || imported > 0) {
+                    monthlyImportCount = monthlyImportUsed ?: (account.monthlyImportCount + imported),
+                    monthlyImportLimit = monthlyImportLimit ?: planLimit,
+                    monthlyImportPeriod = period,
+                    lastMessage = message.ifBlank {
                         "Scanned $scanned messages, found $candidates purchase-document candidates, imported $imported."
-                    } else {
-                        message
                     }
                 )
             } else {
@@ -274,6 +290,7 @@ class EmailConnectorStore(private val context: Context) {
                     status = ConnectorStatus.Ready,
                     monthlyImportCount = 0,
                     monthlyImportLimit = plan.monthlyEmailImports,
+                    monthlyImportPeriod = currentImportPeriod(),
                     lastSyncMillis = null,
                     lastMessage = "Connected. Tap Sync to import receipts."
                 ))
@@ -290,3 +307,5 @@ class EmailConnectorStore(private val context: Context) {
             .apply()
     }
 }
+
+fun currentImportPeriod(): String = YearMonth.now().toString()

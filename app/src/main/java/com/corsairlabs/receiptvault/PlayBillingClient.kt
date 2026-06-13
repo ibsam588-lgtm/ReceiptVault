@@ -43,7 +43,7 @@ enum class ReceiptVaultBillingProduct(
         fallbackPrice = "\$4.99",
         cadence = "Monthly",
         plan = ReceiptVaultPlan.Plus,
-        description = "Cloud backup, 3 email accounts, 250 email imports monthly, and unlimited warranties."
+        description = "No ads, cloud backup, 3 email accounts, 250 email imports monthly, and unlimited warranties."
     ),
     PlusYearly(
         productId = "receiptvault_plus_yearly",
@@ -51,7 +51,7 @@ enum class ReceiptVaultBillingProduct(
         fallbackPrice = "\$47.99",
         cadence = "Yearly",
         plan = ReceiptVaultPlan.Plus,
-        description = "Same Plus features with the yearly 20% discount."
+        description = "No ads and all Plus features with the yearly 20% discount."
     ),
     BusinessMonthly(
         productId = "receiptvault_business_monthly",
@@ -59,7 +59,7 @@ enum class ReceiptVaultBillingProduct(
         fallbackPrice = "\$12.99",
         cadence = "Monthly",
         plan = ReceiptVaultPlan.Business,
-        description = "Higher limits, 10 email accounts, business folders, and tax-ready exports."
+        description = "No ads, higher limits, 10 email accounts, business folders, and tax-ready exports."
     ),
     BusinessYearly(
         productId = "receiptvault_business_yearly",
@@ -67,7 +67,7 @@ enum class ReceiptVaultBillingProduct(
         fallbackPrice = "\$124.99",
         cadence = "Yearly",
         plan = ReceiptVaultPlan.Business,
-        description = "Business features with the yearly 20% discount."
+        description = "No ads and all Business features with the yearly 20% discount."
     )
 }
 

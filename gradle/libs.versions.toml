@@ -10,6 +10,7 @@ lifecycle = "2.8.7"
 mlkitText = "19.0.1"
 mlkitDocScanner = "16.0.0-beta1"
 playBilling = "9.0.0"
+playServicesAds = "23.6.0"
 playServicesAuth = "21.2.0"
 workManager = "2.10.0"
 junit = "4.13.2"
@@ -33,6 +34,7 @@ firebase-auth = { group = "com.google.firebase", name = "firebase-auth-ktx" }
 mlkit-text-recognition = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition", version.ref = "mlkitText" }
 mlkit-document-scanner = { group = "com.google.android.gms", name = "play-services-mlkit-document-scanner", version.ref = "mlkitDocScanner" }
 play-billing = { group = "com.android.billingclient", name = "billing", version.ref = "playBilling" }
+play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "playServicesAuth" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
