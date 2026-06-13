@@ -12,11 +12,19 @@ Upload these files on the default English store listing.
 
 ## Phone Screenshots
 
-`playstore/screenshots/phone/01-home.png`
-`playstore/screenshots/phone/02-search.png`
-`playstore/screenshots/phone/03-add-receipt.png`
-`playstore/screenshots/phone/04-warranties.png`
-`playstore/screenshots/phone/05-plus-backup.png`
+All phone screenshots are 1080 x 1920 PNGs.
 
-The Play Console upload picker must be used manually unless a Google Play
-Developer API service account is configured.
+`playstore/screenshots/phone/01-home-currency.png`
+`playstore/screenshots/phone/02-scan-upload-ocr.png`
+`playstore/screenshots/phone/03-email-connectors.png`
+`playstore/screenshots/phone/04-edit-fields.png`
+`playstore/screenshots/phone/05-search-filters.png`
+`playstore/screenshots/phone/06-warranties-returns.png`
+`playstore/screenshots/phone/07-analytics.png`
+`playstore/screenshots/phone/08-plus-backup.png`
+
+Regenerate these assets with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\generate_playstore_assets.ps1
+```
