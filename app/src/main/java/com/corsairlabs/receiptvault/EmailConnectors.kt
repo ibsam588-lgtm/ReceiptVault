@@ -45,7 +45,7 @@ enum class ReceiptVaultPlan(
 enum class ConnectorStatus(val label: String) {
     OAuthPending("OAuth setup pending"),
     Ready("Ready"),
-    SyncReady("Receipt-only sync ready"),
+    SyncReady("Purchase-document sync ready"),
     Disconnected("Disconnected")
 }
 
@@ -169,7 +169,7 @@ class EmailConnectorStore(private val context: Context) {
         scanned: Int = 0,
         candidates: Int = 0,
         imported: Int = 0,
-        message: String = "Receipt-only sync check completed."
+        message: String = "Purchase-document sync check completed."
     ): ConnectorStoreResult {
         val updated = loadAccounts().map { account ->
             if (account.id == id) {
@@ -178,7 +178,7 @@ class EmailConnectorStore(private val context: Context) {
                     lastSyncMillis = System.currentTimeMillis(),
                     monthlyImportCount = account.monthlyImportCount + imported,
                     lastMessage = if (scanned > 0 || candidates > 0 || imported > 0) {
-                        "Scanned $scanned messages, found $candidates receipt candidates, imported $imported."
+                        "Scanned $scanned messages, found $candidates purchase-document candidates, imported $imported."
                     } else {
                         message
                     }

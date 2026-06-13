@@ -57,6 +57,7 @@ type PlayBillingPurchaseRequest = {
 };
 
 type ConnectorProviderId = "gmail" | "outlook" | "yahoo" | "imap";
+type PurchaseDocumentType = "receipt" | "order" | "invoice" | "bill" | "statement" | "warranty" | "return" | "subscription" | "other";
 
 type OAuthProviderConfig = {
   id: ConnectorProviderId;
@@ -108,6 +109,29 @@ type ProviderMessageCandidate = {
   rfc822MessageId?: string;
 };
 
+type ProviderMessageContent = {
+  text: string;
+  attachments: EmailAttachmentRecord[];
+};
+
+type EmailAttachmentRecord = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  storageKey?: string;
+  stored: boolean;
+  skippedReason?: string;
+};
+
+type GmailAttachmentRef = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  attachmentId?: string;
+};
+
 type ConnectorSyncReport = {
   ok: boolean;
   provider: ConnectorProviderId;
@@ -143,6 +167,12 @@ const BILLING_PRODUCT_PLANS: Record<string, "plus" | "business"> = {
   receiptvault_business_monthly: "business",
   receiptvault_business_yearly: "business"
 };
+
+const EMAIL_BODY_TEXT_LIMIT = 12000;
+const GEMINI_EMAIL_TEXT_LIMIT = 6000;
+const MAX_ATTACHMENTS_PER_DOCUMENT = 8;
+const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+const MAX_ATTACHMENT_TOTAL_BYTES = 16 * 1024 * 1024;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -583,7 +613,7 @@ async function finishConnectorOAuth(request: Request, env: Env): Promise<Respons
   const emailAddress = await fetchConnectorEmailAddress(provider, tokenResponse.tokens);
   await storeConnectorToken(env, state.userId, provider, tokenResponse.tokens, emailAddress);
   const returnLink = state.returnUrl ? `<p><a href="${escapeHtml(state.returnUrl)}">Return to ReceiptVault</a></p>` : "";
-  return html(`<h1>${provider.label} connected</h1><p>ReceiptVault can now run receipt-only imports for this account.</p>${returnLink}`);
+  return html(`<h1>${provider.label} connected</h1><p>ReceiptVault can now run purchase-document imports for this account.</p>${returnLink}`);
 }
 
 async function readOAuthStartBody(request: Request): Promise<OAuthStartRequest> {
@@ -991,9 +1021,17 @@ async function syncProviderForUser(
       const existing = await env.RECEIPTS_BUCKET.head(objectName);
       if (existing) continue;
 
-      const bodyText = providerId === "gmail"
-        ? await fetchGmailMessageFullText(refreshed.access_token as string, candidate.id)
-        : candidate.snippet || "";
+      const content = providerId === "gmail"
+        ? await fetchGmailMessageContent(env, userId, receiptId, refreshed.access_token as string, candidate.id)
+        : await fetchOutlookMessageContent(env, userId, receiptId, refreshed.access_token as string, candidate.id, candidate.snippet || "");
+      const bodyText = (content.text || candidate.snippet || "").slice(0, EMAIL_BODY_TEXT_LIMIT);
+      const documentText = [
+        candidate.subject || "",
+        candidate.from || "",
+        candidate.snippet || "",
+        bodyText,
+        content.attachments.map((attachment) => `${attachment.filename} ${attachment.mimeType}`).join(" ")
+      ].join(" ");
       const purchasedAtMs = candidate.date ? Date.parse(candidate.date) : Date.now();
 
       // Gemini categorization — best-effort, falls back to regex if unavailable
@@ -1004,6 +1042,9 @@ async function syncProviderForUser(
         candidate.date || "",
         bodyText
       );
+      const signalSet = unique([...candidate.signals, ...receiptSignals(documentText)]);
+      const documentType = normalizeDocumentType(typeof ai?.documentType === "string" ? ai.documentType : undefined)
+        || documentTypeFromText(documentText, signalSet);
 
       const merchant = (typeof ai?.merchant === "string" && ai.merchant.trim())
         ? ai.merchant.trim()
@@ -1016,11 +1057,13 @@ async function syncProviderForUser(
         : "Uncategorized");
       const aiConfidence = typeof ai?.confidence === "number" ? ai.confidence : 0;
       const purchasedAtMillis = Number.isNaN(purchasedAtMs) ? Date.now() : purchasedAtMs;
+      const sourceLabel = documentTypeLabel(documentType);
 
       // Use bodyText only in memory for extraction — do NOT persist raw email content
       const receipt: Record<string, unknown> = {
         id: receiptId,
         emailMessageId: receiptId,
+        documentType,
         merchant,
         amountCents,
         purchasedAtMillis,
@@ -1028,13 +1071,17 @@ async function syncProviderForUser(
         location: "Location not detected",
         returnByMillis: null,
         warrantyUntilMillis: null,
-        metadataPattern: receiptMetadataPattern(purchasedAtMillis, category, null, null),
+        metadataPattern: receiptMetadataPattern(purchasedAtMillis, category, null, null, documentType),
         notes: aiConfidence > 0.6
           ? `Gemini categorized ${Math.round(aiConfidence * 100)}% — ${candidate.from || "email"} · ${candidate.subject || "no subject"}`
           : `Imported from ${candidate.from || "email"} — ${candidate.subject || "no subject"}`,
-        rawText: "",
+        rawText: bodyText,
         imagePath: "",
         source: "EmailShare",
+        emailSubject: candidate.subject || "",
+        emailFrom: candidate.from || "",
+        emailDate: candidate.date || "",
+        emailAttachments: content.attachments,
         emailUrl: candidate.webUrl || (providerId === "gmail"
           ? `https://mail.google.com/mail/u/0/#all/${candidate.id}`
           : providerId === "outlook"
@@ -1062,10 +1109,10 @@ async function syncProviderForUser(
       receipts: importedReceipts,
       plan,
       message: importedReceipts.length > 0
-        ? `Imported ${importedReceipts.length} receipt${importedReceipts.length === 1 ? "" : "s"} from ${candidates.length} scanned messages.`
+        ? `Imported ${importedReceipts.length} purchase document${importedReceipts.length === 1 ? "" : "s"} from ${candidates.length} scanned messages.`
         : receiptCandidates.length > 0
-        ? `Scanned ${candidates.length} messages; no new receipt emails to import.`
-        : `Scanned ${candidates.length} messages; none matched receipt signals strongly enough to import.`
+        ? `Scanned ${candidates.length} messages; no new purchase documents to import.`
+        : `Scanned ${candidates.length} messages; none matched receipt, bill, invoice, warranty, order, or statement signals strongly enough to import.`
     };
   } catch (error) {
     return syncError(providerId, syncedAt, error instanceof Error ? error.message : "sync_failed");
@@ -1275,26 +1322,206 @@ function gmailWebUrl(accountEmail: string | undefined, threadId: string, rfc822M
   return `${base}#all/${encodeURIComponent(threadId)}`;
 }
 
-async function fetchGmailMessageFullText(accessToken: string, messageId: string): Promise<string> {
+async function fetchGmailMessageContent(
+  env: Env,
+  userId: string,
+  receiptId: string,
+  accessToken: string,
+  messageId: string
+): Promise<ProviderMessageContent> {
   const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`);
   url.searchParams.set("format", "full");
   const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
-  if (!response.ok) return "";
+  if (!response.ok) return { text: "", attachments: [] };
   const message: Record<string, unknown> = await response.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
   const payload: Record<string, unknown> = isRecord(message.payload) ? message.payload : {};
-  return extractPartsText(payload).slice(0, 4000);
+  const textParts: string[] = [];
+  const attachmentRefs: GmailAttachmentRef[] = [];
+  collectGmailMessageContent(payload, textParts, attachmentRefs);
+
+  const attachments: EmailAttachmentRecord[] = [];
+  let totalBytes = 0;
+  for (const attachment of attachmentRefs.slice(0, MAX_ATTACHMENTS_PER_DOCUMENT)) {
+    const record = baseAttachmentRecord(attachment.id, attachment.filename, attachment.mimeType, attachment.size);
+    if (!attachment.attachmentId) {
+      record.skippedReason = "missing_attachment_id";
+    } else if (attachment.size > MAX_ATTACHMENT_BYTES) {
+      record.skippedReason = "too_large";
+    } else if (totalBytes + attachment.size > MAX_ATTACHMENT_TOTAL_BYTES) {
+      record.skippedReason = "total_limit";
+    } else {
+      const stored = await fetchAndStoreGmailAttachment(env, userId, receiptId, accessToken, messageId, attachment);
+      record.size = stored.size || record.size;
+      record.storageKey = stored.storageKey;
+      record.stored = Boolean(stored.storageKey);
+      record.skippedReason = stored.skippedReason;
+      totalBytes += stored.size || 0;
+    }
+    attachments.push(record);
+  }
+
+  return {
+    text: textParts.join("\n").replace(/\s{3,}/g, " ").trim().slice(0, EMAIL_BODY_TEXT_LIMIT),
+    attachments
+  };
 }
 
-function extractPartsText(part: Record<string, unknown>): string {
+function collectGmailMessageContent(
+  part: Record<string, unknown>,
+  textParts: string[],
+  attachments: GmailAttachmentRef[]
+): void {
   const mimeType = typeof part.mimeType === "string" ? part.mimeType : "";
+  const filename = typeof part.filename === "string" ? part.filename.trim() : "";
+  const partId = typeof part.partId === "string" ? part.partId : crypto.randomUUID();
   const body: Record<string, unknown> = isRecord(part.body) ? part.body : {};
   const data = typeof body.data === "string" ? body.data : "";
+  const attachmentId = typeof body.attachmentId === "string" ? body.attachmentId : undefined;
+  const size = numberFromUnknown(body.size) || 0;
   if (data && mimeType.startsWith("text/")) {
     const decoded = new TextDecoder().decode(base64UrlDecode(data));
-    return mimeType === "text/html" ? stripHtml(decoded) : decoded;
+    textParts.push(mimeType === "text/html" ? stripHtml(decoded) : decoded);
+  } else if ((filename || attachmentId) && !mimeType.startsWith("text/")) {
+    attachments.push({
+      id: partId,
+      filename: filename || `attachment-${partId}`,
+      mimeType: mimeType || "application/octet-stream",
+      size,
+      attachmentId
+    });
   }
   const parts = Array.isArray(part.parts) ? part.parts.filter(isRecord) : [];
-  return parts.map(extractPartsText).filter(Boolean).join("\n");
+  for (const child of parts) collectGmailMessageContent(child, textParts, attachments);
+}
+
+async function fetchAndStoreGmailAttachment(
+  env: Env,
+  userId: string,
+  receiptId: string,
+  accessToken: string,
+  messageId: string,
+  attachment: GmailAttachmentRef
+): Promise<{ storageKey?: string; size?: number; skippedReason?: string }> {
+  const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.attachmentId || "")}`);
+  const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) return { skippedReason: `gmail_attachment_failed:${response.status}` };
+  const body = await response.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  const data = typeof body.data === "string" ? body.data : "";
+  if (!data) return { skippedReason: "empty_attachment" };
+  const bytes = base64UrlDecode(data);
+  if (bytes.byteLength > MAX_ATTACHMENT_BYTES) return { size: bytes.byteLength, skippedReason: "too_large" };
+  const storageKey = emailAttachmentObjectName(userId, receiptId, attachment.id, attachment.filename);
+  await env.RECEIPTS_BUCKET.put(storageKey, bytes, {
+    httpMetadata: {
+      contentType: attachment.mimeType || "application/octet-stream"
+    }
+  });
+  return { storageKey, size: bytes.byteLength };
+}
+
+async function fetchOutlookMessageContent(
+  env: Env,
+  userId: string,
+  receiptId: string,
+  accessToken: string,
+  messageId: string,
+  fallbackText: string
+): Promise<ProviderMessageContent> {
+  const messageUrl = new URL(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}`);
+  messageUrl.searchParams.set("$select", "body,bodyPreview");
+  const response = await fetch(messageUrl, { headers: { authorization: `Bearer ${accessToken}` } });
+  let text = fallbackText;
+  if (response.ok) {
+    const body = await response.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+    const messageBody = isRecord(body.body) ? body.body : {};
+    const content = typeof messageBody.content === "string" ? messageBody.content : "";
+    const contentType = typeof messageBody.contentType === "string" ? messageBody.contentType.toLowerCase() : "";
+    text = contentType === "html" ? stripHtml(content) : content || fallbackText;
+  }
+
+  const attachments = await fetchAndStoreOutlookAttachments(env, userId, receiptId, accessToken, messageId);
+  return {
+    text: text.replace(/\s{3,}/g, " ").trim().slice(0, EMAIL_BODY_TEXT_LIMIT),
+    attachments
+  };
+}
+
+async function fetchAndStoreOutlookAttachments(
+  env: Env,
+  userId: string,
+  receiptId: string,
+  accessToken: string,
+  messageId: string
+): Promise<EmailAttachmentRecord[]> {
+  const listUrl = new URL(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments`);
+  listUrl.searchParams.set("$top", String(MAX_ATTACHMENTS_PER_DOCUMENT));
+  listUrl.searchParams.set("$select", "id,name,contentType,size,isInline");
+  const response = await fetch(listUrl, { headers: { authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) return [];
+  const body = await response.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  const values = Array.isArray(body.value) ? body.value.filter(isRecord).slice(0, MAX_ATTACHMENTS_PER_DOCUMENT) : [];
+  const attachments: EmailAttachmentRecord[] = [];
+  let totalBytes = 0;
+
+  for (const attachment of values) {
+    const id = typeof attachment.id === "string" ? attachment.id : crypto.randomUUID();
+    const filename = typeof attachment.name === "string" && attachment.name.trim() ? attachment.name.trim() : `attachment-${id}`;
+    const mimeType = typeof attachment.contentType === "string" && attachment.contentType.trim()
+      ? attachment.contentType.trim()
+      : "application/octet-stream";
+    const size = numberFromUnknown(attachment.size) || 0;
+    const record = baseAttachmentRecord(id, filename, mimeType, size);
+    if (attachment.isInline === true) {
+      record.skippedReason = "inline";
+      attachments.push(record);
+      continue;
+    }
+    if (size > MAX_ATTACHMENT_BYTES) {
+      record.skippedReason = "too_large";
+      attachments.push(record);
+      continue;
+    }
+    if (totalBytes + size > MAX_ATTACHMENT_TOTAL_BYTES) {
+      record.skippedReason = "total_limit";
+      attachments.push(record);
+      continue;
+    }
+
+    const stored = await fetchAndStoreOutlookAttachment(env, userId, receiptId, accessToken, messageId, record);
+    record.size = stored.size || record.size;
+    record.storageKey = stored.storageKey;
+    record.stored = Boolean(stored.storageKey);
+    record.skippedReason = stored.skippedReason;
+    totalBytes += stored.size || 0;
+    attachments.push(record);
+  }
+
+  return attachments;
+}
+
+async function fetchAndStoreOutlookAttachment(
+  env: Env,
+  userId: string,
+  receiptId: string,
+  accessToken: string,
+  messageId: string,
+  attachment: EmailAttachmentRecord
+): Promise<{ storageKey?: string; size?: number; skippedReason?: string }> {
+  const url = new URL(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}`);
+  const response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) return { skippedReason: `outlook_attachment_failed:${response.status}` };
+  const body = await response.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  const contentBytes = typeof body.contentBytes === "string" ? body.contentBytes : "";
+  if (!contentBytes) return { skippedReason: "metadata_only" };
+  const bytes = base64Decode(contentBytes);
+  if (bytes.byteLength > MAX_ATTACHMENT_BYTES) return { size: bytes.byteLength, skippedReason: "too_large" };
+  const storageKey = emailAttachmentObjectName(userId, receiptId, attachment.id, attachment.filename);
+  await env.RECEIPTS_BUCKET.put(storageKey, bytes, {
+    httpMetadata: {
+      contentType: attachment.mimeType || "application/octet-stream"
+    }
+  });
+  return { storageKey, size: bytes.byteLength };
 }
 
 function stripHtml(html: string): string {
@@ -1370,7 +1597,8 @@ function receiptMetadataPattern(
   purchasedAtMillis: number,
   category: string,
   returnByMillis: number | null,
-  warrantyUntilMillis: number | null
+  warrantyUntilMillis: number | null,
+  documentType: PurchaseDocumentType = "receipt"
 ): string {
   const purchased = new Date(purchasedAtMillis).toISOString().slice(0, 10);
   const month = purchased.slice(0, 7);
@@ -1381,6 +1609,8 @@ function receiptMetadataPattern(
     `purchase:${purchased}`,
     `date:${purchased}`,
     `month:${month}`,
+    `type:${documentType}`,
+    `document:${documentType}`,
     `category:${toPatternToken(category)}`,
     `return:${returnByMillis ? "set" : "not-set"}`,
     `return:${returnValue}`,
@@ -1391,6 +1621,49 @@ function receiptMetadataPattern(
 
 function toPatternToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "uncategorized";
+}
+
+function normalizeDocumentType(value: string | undefined): PurchaseDocumentType | null {
+  const normalized = (value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!normalized) return null;
+  if (["receipt", "sales receipt"].includes(normalized)) return "receipt";
+  if (["order", "order confirmation", "purchase order"].includes(normalized)) return "order";
+  if (["invoice"].includes(normalized)) return "invoice";
+  if (["bill", "utility bill", "payment due"].includes(normalized)) return "bill";
+  if (["statement", "account statement"].includes(normalized)) return "statement";
+  if (["warranty", "protection plan", "coverage"].includes(normalized)) return "warranty";
+  if (["return", "return label", "return confirmation"].includes(normalized)) return "return";
+  if (["subscription", "recurring charge"].includes(normalized)) return "subscription";
+  if (normalized === "other") return "other";
+  return null;
+}
+
+function documentTypeFromText(text: string, signals: string[]): PurchaseDocumentType {
+  const normalized = text.toLowerCase();
+  if (signals.includes("warranty")) return "warranty";
+  if (signals.includes("return")) return "return";
+  if (signals.includes("invoice")) return "invoice";
+  if (signals.includes("bill")) return "bill";
+  if (signals.includes("statement")) return "statement";
+  if (signals.includes("subscription")) return "subscription";
+  if (signals.includes("order") || signals.includes("shipped")) return "order";
+  if (signals.includes("receipt") || signals.includes("purchase")) return "receipt";
+  if (/\bstatement\b|\baccount summary\b/.test(normalized)) return "statement";
+  return "other";
+}
+
+function documentTypeLabel(type: PurchaseDocumentType): string {
+  return type.charAt(0).toUpperCase() + type.slice(1);
+}
+
+function baseAttachmentRecord(id: string, filename: string, mimeType: string, size: number): EmailAttachmentRecord {
+  return {
+    id,
+    filename,
+    mimeType,
+    size,
+    stored: false
+  };
 }
 
 function gmailHeaders(detail: Record<string, unknown>): Record<string, string> {
@@ -1493,6 +1766,18 @@ function connectorSyncReportObjectName(userId: string, provider: ConnectorProvid
 
 function receiptMetadataObjectName(userId: string, receiptId: string): string {
   return `users/${userId}/receipts/${receiptId}/metadata.json`;
+}
+
+function emailAttachmentObjectName(userId: string, receiptId: string, attachmentId: string, filename: string): string {
+  return `users/${userId}/receipts/${receiptId}/attachments/${safeObjectName(attachmentId)}-${safeObjectName(filename)}`;
+}
+
+function safeObjectName(value: string): string {
+  return value
+    .replace(/[/\\?#%:<>|"^`{}[\]\s]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || "attachment";
 }
 
 async function indexConnectorUser(env: Env, userId: string): Promise<void> {
@@ -1639,6 +1924,12 @@ function base64UrlDecode(value: string): Uint8Array {
   return Uint8Array.from(raw, (char) => char.charCodeAt(0));
 }
 
+function base64Decode(value: string): Uint8Array {
+  const padded = value.padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const raw = atob(padded);
+  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
+}
+
 async function connectorCandidate(request: Request): Promise<Response> {
   const body = await readConnectorCandidateBody(request);
   const text = [body.subject, body.from, body.snippet]
@@ -1656,8 +1947,8 @@ async function connectorCandidate(request: Request): Promise<Response> {
     shouldStoreMessage: false,
     matchedSignals: signals,
     reason: shouldInspect
-      ? "Candidate looks like a receipt/order. Inspect only the body or attachments needed to import receipt data."
-      : "No receipt/order signal. Discard headers/snippet and do not inspect body or attachments."
+      ? "Candidate looks like a receipt, bill, invoice, warranty, order, statement, or return document. Inspect only the body or attachments needed to import document data."
+      : "No purchase-document signal. Discard headers/snippet and do not inspect body or attachments."
   });
 }
 
@@ -1676,6 +1967,8 @@ function receiptSignals(text: string): string[] {
     ["invoice", /\binvoice\b/],
     ["purchase", /\bpurchase\b|\bpurchase confirmation\b/],
     ["shipped", /\bshipped\b|\bdelivered\b/],
+    ["statement", /\bstatement\b|\baccount summary\b|\bmonthly summary\b/],
+    ["subscription", /\bsubscription\b|\brecurring charge\b|\bmembership renewal\b/],
     // "return" alone is far too broad (matches "return to sender", "returning customer", etc.)
     // — require purchase-return context.
     ["return", /\breturn window\b|\bdays? to return\b|\breturn eligible\b|\bfree returns?\b/],
@@ -1725,12 +2018,16 @@ const geminiResponseSchema = {
         "Uncategorized"
       ]
     },
+    documentType: {
+      type: "STRING",
+      enum: ["receipt", "order", "invoice", "bill", "statement", "warranty", "return", "subscription", "other"]
+    },
     warrantyCandidate: { type: "BOOLEAN" },
     returnWindowDays: { type: "INTEGER" },
     confidence: { type: "NUMBER" },
     notes: { type: "STRING" }
   },
-  required: ["isReceipt", "confidence", "category"]
+  required: ["isReceipt", "confidence", "category", "documentType"]
 };
 
 async function categorizeReceipt(request: Request, env: Env): Promise<Response> {
@@ -1784,9 +2081,10 @@ async function readCategorizeBody(request: Request): Promise<CategorizeRequest> 
 
 function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): string {
   return [
-    "You classify receipt or order text for ReceiptVault.",
-    "Use only the provided receipt/order text and optional email headers.",
-    "If the text is not a receipt, order, invoice, return, or warranty record, set isReceipt to false and confidence to 0.3 or lower.",
+    "You classify purchase documents for ReceiptVault.",
+    "Use only the provided document text and optional email headers.",
+    "Classify receipts, order confirmations, invoices, bills, utility bills, statements, returns, subscriptions, and warranty/protection records.",
+    "If the text is not one of those records, set isReceipt to false and confidence to 0.3 or lower.",
     "Set warrantyCandidate true only when the text explicitly says warranty, guarantee, protection plan, or coverage for a product or service.",
     "Do not infer warranty from category, card/bank receipts, or standard return/exchange wording.",
     "Do not include unrelated email content. Return only JSON.",
@@ -1798,6 +2096,7 @@ function buildCategorizationPrompt(body: CategorizeRequest, ocrText: string): st
     '  "total": number | null,',
     '  "currencyCode": "USD" | "CAD" | "AUD" | "EUR" | "GBP" | "INR" | "PKR" | "AED" | "SAR" | "JPY" | "CNY" | "KRW" | "TRY" | "BRL" | "MXN" | null,',
     '  "purchaseDate": "YYYY-MM-DD" | null,',
+    '  "documentType": "receipt" | "order" | "invoice" | "bill" | "statement" | "warranty" | "return" | "subscription" | "other",',
     '  "category": "Groceries" | "Electronics" | "Home" | "Business" | "Shopping" | "Food" | "Travel" | "Health" | "Auto" | "Other" | "Uncategorized",',
     '  "warrantyCandidate": boolean,',
     '  "returnWindowDays": number | null,',
@@ -1831,7 +2130,7 @@ async function callGeminiForEmail(
   if (!env.GEMINI_API_KEY || !bodyText.trim()) return null;
   const prompt = buildCategorizationPrompt(
     { emailSubject: subject, emailFrom: from, emailDate: date },
-    bodyText.slice(0, 6000)
+    bodyText.slice(0, GEMINI_EMAIL_TEXT_LIMIT)
   );
   const model = env.GEMINI_MODEL || "gemini-2.5-flash-lite";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`;

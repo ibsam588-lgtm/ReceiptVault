@@ -806,7 +806,7 @@ private fun ImportScreen(onScan: () -> Unit, onPickImage: () -> Unit, onEmailAcc
     ) {
         item {
             Text(
-                "Add receipts from your camera, gallery, files, or an email attachment shared from Gmail or Outlook.",
+                "Add receipts, bills, invoices, warranties, and orders from your camera, gallery, files, or email.",
                 color = Muted
             )
         }
@@ -831,7 +831,7 @@ private fun ImportScreen(onScan: () -> Unit, onPickImage: () -> Unit, onEmailAcc
         item {
             ImportCard(
                 title = "Import from email",
-                detail = "Share an attachment now, or connect email accounts for receipt-only automatic imports.",
+                detail = "Share an attachment now, or connect email accounts for automatic purchase-document imports.",
                 icon = { Icon(Icons.Default.Email, contentDescription = null) },
                 button = "Email accounts",
                 onClick = onEmailAccounts
@@ -1590,7 +1590,7 @@ private fun ReceiptDetailScreen(
                             openEmailUrl(context, url)
                         }
                     },
-                    label = { Text(receipt.source.label) }
+                    label = { Text(receipt.documentTypeLabel) }
                 )
                 Spacer(Modifier.width(8.dp))
                 IconButton(
@@ -1665,10 +1665,27 @@ private fun ReceiptDetailScreen(
                         Column(Modifier.weight(1f)) {
                             Text("View original email", fontWeight = FontWeight.Bold)
                             Text(emailAppLabel, color = Muted, style = MaterialTheme.typography.bodySmall)
+                            receipt.emailFrom?.let {
+                                Text("From: $it", color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            receipt.emailSubject?.let {
+                                Text(it, color = Ink, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                         Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Muted)
                     }
                 }
+            }
+        }
+        if (receipt.emailAttachments.isNotEmpty()) {
+            item {
+                EmailAttachmentsCard(receipt.emailAttachments)
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DetailTile(Modifier.weight(1f), "Type", receipt.documentTypeLabel, Icons.Default.Info)
+                DetailTile(Modifier.weight(1f), "Source", receipt.source.label, Icons.Default.Email)
             }
         }
         item {
@@ -1764,6 +1781,14 @@ private fun ReceiptEditCard(
                 required = true
             )
             OutlinedTextField(
+                value = state.documentType,
+                onValueChange = { onStateChange(state.copy(documentType = it)) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Document type") },
+                placeholder = { Text("Receipt, bill, invoice, warranty") },
+                singleLine = true
+            )
+            OutlinedTextField(
                 value = state.category,
                 onValueChange = { onStateChange(state.copy(category = it)) },
                 modifier = Modifier.fillMaxWidth(),
@@ -1857,6 +1882,32 @@ private fun DateInputField(
             }
         ) {
             DatePicker(state = pickerState)
+        }
+    }
+}
+
+@Composable
+private fun EmailAttachmentsCard(attachments: List<ReceiptEmailAttachment>) {
+    Card(shape = RoundedCornerShape(8.dp), colors = CardDefaults.cardColors(Color.White)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Email attachments", fontWeight = FontWeight.ExtraBold)
+            attachments.forEach { attachment ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Email, contentDescription = null, tint = TealDark)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(attachment.filename, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${attachment.mimeType} - ${formatFileSize(attachment.size)}",
+                            color = Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Text(attachment.statusLabel, color = Muted, style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
     }
 }
@@ -2152,7 +2203,7 @@ private fun TaxExportCard(receipts: List<Receipt>) {
 
 private fun buildTaxCsv(receipts: List<Receipt>): String {
     val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val header = "Date,Merchant,Category,Amount,Currency,Return By,Warranty Until,Tax Amount,Notes,Metadata Pattern"
+    val header = "Date,Merchant,Document Type,Category,Amount,Currency,Return By,Warranty Until,Email From,Email Subject,Attachment Count,Tax Amount,Notes,Metadata Pattern"
     val rows = receipts.sortedByDescending { it.purchasedAtMillis }.map { r ->
         val date = Instant.ofEpochMilli(r.purchasedAtMillis).atZone(ZoneId.systemDefault()).toLocalDate().format(fmt)
         val amount = "%.2f".format(r.amountCents / 100.0)
@@ -2160,11 +2211,15 @@ private fun buildTaxCsv(receipts: List<Receipt>): String {
         listOf(
             date,
             csvField(r.merchant),
+            csvField(r.documentTypeLabel),
             csvField(r.normalizedCategory),
             amount,
             r.currencyCode,
             r.returnByIso.orEmpty(),
             r.warrantyUntilIso.orEmpty(),
+            csvField(r.emailFrom.orEmpty()),
+            csvField(r.emailSubject.orEmpty()),
+            r.emailAttachments.size.toString(),
             "",
             csvField(r.notes),
             csvField(r.metadataPattern)
@@ -2237,7 +2292,7 @@ private fun ReceiptRow(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(receipt.merchant, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${receipt.category} - ${receipt.purchaseDateLabel}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text("${receipt.documentTypeLabel} - ${receipt.category} - ${receipt.purchaseDateLabel}", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
             Text(formatCurrency(receipt.amountCents, receipt.currencyCode), fontWeight = FontWeight.ExtraBold)
             if (trailingContent != null) {
@@ -2933,7 +2988,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                         provider = EmailProvider.Imap,
                         emailAddress = config.emailAddress,
                         status = ConnectorStatus.Ready,
-                        lastMessage = "IMAP settings saved encrypted. Receipt-only imports will use this mailbox configuration."
+                    lastMessage = "IMAP settings saved encrypted. Purchase-document imports will use this mailbox configuration."
                     )
                     _emailAccounts.value = result.accounts
                     _message.value = "IMAP connector saved."
@@ -2968,7 +3023,7 @@ class ReceiptVaultViewModel(application: Application) : AndroidViewModel(applica
                     }
                 }
                 val syncMessage = if (summary.imported > 0 && importedNow == 0) {
-                    "No new receipt emails to import."
+                    "No new purchase documents to import."
                 } else {
                     summary.message
                 }
@@ -3591,6 +3646,7 @@ data class ReceiptEditState(
     val amount: String,
     val currencyCode: String,
     val purchaseDate: String,
+    val documentType: String,
     val category: String,
     val returnByDate: String,
     val warrantyUntilDate: String
@@ -3606,6 +3662,7 @@ data class ReceiptEditState(
             amountCents = amountCents,
             currencyCode = normalizedCurrency,
             purchasedAtMillis = purchaseDateMillis,
+            documentType = normalizeDocumentType(documentType),
             category = normalizeReceiptCategory(category),
             returnByMillis = returnMillis.takeIf { it > 0L },
             warrantyUntilMillis = warrantyMillis.takeIf { it > 0L }
@@ -3617,6 +3674,7 @@ data class ReceiptEditState(
             amount = "%.2f".format(Locale.US, receipt.amountCents / 100.0),
             currencyCode = receipt.currencyCode,
             purchaseDate = receipt.purchasedAtMillis.formatIsoDate(),
+            documentType = receipt.documentTypeLabel,
             category = receipt.category,
             returnByDate = receipt.returnByMillis?.formatIsoDate().orEmpty(),
             warrantyUntilDate = receipt.warrantyUntilMillis?.formatIsoDate().orEmpty()
@@ -3636,12 +3694,51 @@ data class ReceiptDraft(
     val notes: String
 )
 
+data class ReceiptEmailAttachment(
+    val filename: String,
+    val mimeType: String,
+    val size: Long,
+    val storageKey: String?,
+    val stored: Boolean,
+    val skippedReason: String?
+) {
+    val statusLabel: String
+        get() = when {
+            stored -> "Attached"
+            skippedReason.isNullOrBlank() -> "Metadata only"
+            skippedReason == "too_large" -> "Too large"
+            skippedReason == "total_limit" -> "Skipped by size limit"
+            skippedReason == "inline" -> "Inline"
+            else -> "Metadata only"
+        }
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("filename", filename)
+        .put("mimeType", mimeType)
+        .put("size", size)
+        .put("storageKey", storageKey ?: "")
+        .put("stored", stored)
+        .put("skippedReason", skippedReason ?: "")
+
+    companion object {
+        fun fromJson(json: JSONObject): ReceiptEmailAttachment = ReceiptEmailAttachment(
+            filename = json.optString("filename", "Attachment"),
+            mimeType = json.optString("mimeType", "application/octet-stream"),
+            size = json.optLong("size", 0),
+            storageKey = json.optString("storageKey", "").takeIf { it.isNotBlank() },
+            stored = json.optBoolean("stored", false),
+            skippedReason = json.optString("skippedReason", "").takeIf { it.isNotBlank() }
+        )
+    }
+}
+
 data class Receipt(
     val id: String,
     val merchant: String,
     val amountCents: Long,
     val currencyCode: String = defaultCurrencyCode(),
     val purchasedAtMillis: Long,
+    val documentType: String = "receipt",
     val category: String,
     val location: String,
     val returnByMillis: Long?,
@@ -3651,10 +3748,16 @@ data class Receipt(
     val imagePath: String,
     val source: ImportSource,
     val emailUrl: String? = null,
-    val emailMessageId: String? = null
+    val emailMessageId: String? = null,
+    val emailSubject: String? = null,
+    val emailFrom: String? = null,
+    val emailDate: String? = null,
+    val emailAttachments: List<ReceiptEmailAttachment> = emptyList()
 ) {
     val purchaseDateLabel: String get() = purchasedAtMillis.formatDate()
     val purchasedIso: String get() = purchasedAtMillis.formatIsoDate()
+    val normalizedDocumentType: String get() = normalizeDocumentType(documentType)
+    val documentTypeLabel: String get() = normalizedDocumentType.toDocumentTypeLabel()
     val normalizedCategory: String get() = normalizeReceiptCategory(category)
     val returnByIso: String? get() = returnByMillis?.formatIsoDate()
     val warrantyUntilIso: String? get() = warrantyUntilMillis?.formatIsoDate()
@@ -3668,6 +3771,7 @@ data class Receipt(
         .put("amountCents", amountCents)
         .put("currencyCode", currencyCode)
         .put("purchasedAtMillis", purchasedAtMillis)
+        .put("documentType", normalizedDocumentType)
         .put("category", normalizedCategory)
         .put("location", location)
         .put("returnByMillis", returnByMillis)
@@ -3679,6 +3783,10 @@ data class Receipt(
         .put("source", source.name)
         .put("emailUrl", emailUrl ?: "")
         .put("emailMessageId", emailMessageId ?: "")
+        .put("emailSubject", emailSubject ?: "")
+        .put("emailFrom", emailFrom ?: "")
+        .put("emailDate", emailDate ?: "")
+        .put("emailAttachments", JSONArray(emailAttachments.map { it.toJson() }))
 
     companion object {
         fun fromJson(json: JSONObject): Receipt = Receipt(
@@ -3688,6 +3796,7 @@ data class Receipt(
             amountCents = json.optLong("amountCents", 0),
             currencyCode = normalizeCurrencyCode(json.optString("currencyCode", "")) ?: defaultCurrencyCode(),
             purchasedAtMillis = json.optLong("purchasedAtMillis", todayMillis()),
+            documentType = normalizeDocumentType(json.optString("documentType", "receipt")),
             category = normalizeReceiptCategory(json.optString("category", "Uncategorized")),
             location = json.optString("location", "Location not detected"),
             returnByMillis = json.nullableLong("returnByMillis"),
@@ -3697,7 +3806,11 @@ data class Receipt(
             imagePath = json.optString("imagePath", ""),
             source = runCatching { ImportSource.valueOf(json.optString("source", ImportSource.Image.name)) }.getOrDefault(ImportSource.Image),
             emailUrl = json.optString("emailUrl", "").takeIf { it.isNotBlank() },
-            emailMessageId = json.optString("emailMessageId", "").takeIf { it.isNotBlank() }
+            emailMessageId = json.optString("emailMessageId", "").takeIf { it.isNotBlank() },
+            emailSubject = json.optString("emailSubject", "").takeIf { it.isNotBlank() },
+            emailFrom = json.optString("emailFrom", "").takeIf { it.isNotBlank() },
+            emailDate = json.optString("emailDate", "").takeIf { it.isNotBlank() },
+            emailAttachments = json.optJSONArray("emailAttachments").toReceiptEmailAttachments()
         )
     }
 }
@@ -3905,6 +4018,13 @@ private fun formatCurrency(cents: Long, currencyCode: String = defaultCurrencyCo
     }.format(cents / 100.0)
 }
 
+private fun formatFileSize(bytes: Long): String {
+    if (bytes <= 0) return "size unknown"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "%.0f KB".format(Locale.US, kb)
+    return "%.1f MB".format(Locale.US, kb / 1024.0)
+}
+
 private fun String.toCents(): Long {
     return toCentsOrNull() ?: 0L
 }
@@ -3982,6 +4102,35 @@ private fun normalizeReceiptCategory(value: String?): String {
     }
 }
 
+private fun normalizeDocumentType(value: String?): String {
+    val normalized = value.orEmpty()
+        .lowercase(Locale.US)
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
+    return when (normalized) {
+        "", "receipt", "sales receipt" -> "receipt"
+        "order", "order confirmation", "purchase order" -> "order"
+        "invoice" -> "invoice"
+        "bill", "utility bill", "payment due" -> "bill"
+        "statement", "account statement" -> "statement"
+        "warranty", "protection plan", "coverage" -> "warranty"
+        "return", "return label", "return confirmation" -> "return"
+        "subscription", "recurring charge" -> "subscription"
+        "other" -> "other"
+        else -> normalized.split(" ").firstOrNull().takeIf {
+            it in setOf("receipt", "order", "invoice", "bill", "statement", "warranty", "return", "subscription")
+        } ?: "other"
+    }
+}
+
+private fun String.toDocumentTypeLabel(): String =
+    split("-", " ")
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { part ->
+            part.replaceFirstChar { char -> char.uppercase(Locale.US) }
+        }
+        .ifBlank { "Receipt" }
+
 private fun receiptMetadataPattern(receipt: Receipt): String {
     val purchasedMonth = receipt.purchasedIso.take(7)
     val returnValue = receipt.returnByIso ?: "not-set"
@@ -3991,6 +4140,8 @@ private fun receiptMetadataPattern(receipt: Receipt): String {
         "purchase:${receipt.purchasedIso}",
         "date:${receipt.purchasedIso}",
         "month:$purchasedMonth",
+        "type:${receipt.normalizedDocumentType.toPatternToken()}",
+        "document:${receipt.normalizedDocumentType.toPatternToken()}",
         "category:${receipt.normalizedCategory.toPatternToken()}",
         "return:${if (receipt.returnByIso == null) "not-set" else "set"}",
         "return:$returnValue",
@@ -4075,11 +4226,20 @@ private fun Receipt.matchesSearchTerm(term: String): Boolean {
     if (term == "warranty") return warrantyUntilMillis != null
     if (term == "return") return returnByMillis != null
     if (term == "purchased" || term == "purchase" || term == "date") return true
+    val attachmentText = emailAttachments.joinToString(" ") {
+        "${it.filename} ${it.mimeType} ${it.statusLabel}"
+    }
     return listOf(
         merchant,
+        normalizedDocumentType,
+        documentTypeLabel,
         normalizedCategory,
         location,
         notes,
+        emailSubject.orEmpty(),
+        emailFrom.orEmpty(),
+        emailDate.orEmpty(),
+        attachmentText,
         purchaseDateLabel,
         purchasedIso,
         returnByLabel,
@@ -4107,4 +4267,14 @@ private fun String.containsWholeSearchTerm(term: String): Boolean {
 
 private fun JSONObject.nullableLong(key: String): Long? {
     return if (isNull(key) || !has(key)) null else optLong(key)
+}
+
+private fun JSONArray?.toReceiptEmailAttachments(): List<ReceiptEmailAttachment> {
+    if (this == null) return emptyList()
+    return buildList {
+        for (index in 0 until length()) {
+            val item = optJSONObject(index) ?: continue
+            add(ReceiptEmailAttachment.fromJson(item))
+        }
+    }
 }

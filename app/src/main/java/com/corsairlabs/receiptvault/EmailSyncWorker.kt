@@ -58,7 +58,7 @@ class EmailSyncWorker(
                     }
                 }
                 val syncMessage = if (summary.imported > 0 && importedNow == 0) {
-                    "No new receipt emails to import."
+                    "No new purchase documents to import."
                 } else {
                     summary.message
                 }

@@ -145,7 +145,7 @@ class EmailConnectorClient {
         val ok = report.optBoolean("ok", false)
         val status = report.optString("status", "")
         val apiError = report.optString("error", "")
-        val message = report.optString("message", "Receipt-only sync check completed.")
+        val message = report.optString("message", "Purchase-document sync check completed.")
         if (!ok) {
             throw IOException(connectorReportErrorMessage(apiError, message))
         }
